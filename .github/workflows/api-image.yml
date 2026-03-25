@@ -1,0 +1,54 @@
+name: Build API Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "**"
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: poneglyph-one-optcg-api
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API image
+        env:
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        run: |
+          docker build -t "$IMAGE_URI:sha-${GITHUB_SHA}" .
+          docker push "$IMAGE_URI:sha-${GITHUB_SHA}"
+
+          if [ "${GITHUB_REF_NAME}" = "main" ] || [ "${GITHUB_REF_NAME}" = "master" ]; then
+            docker tag "$IMAGE_URI:sha-${GITHUB_SHA}" "$IMAGE_URI:latest"
+            docker push "$IMAGE_URI:latest"
+          fi
+
+      - name: Summarize image tag
+        env:
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        run: |
+          echo "Pushed $IMAGE_URI:sha-${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"

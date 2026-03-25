@@ -41,7 +41,15 @@ export interface EcsTaskConfig {
   assignPublicIp: boolean;
 }
 
-export function getEcsTaskConfig(prefix: "SCRAPER" | "PRICES"): EcsTaskConfig | null {
+export type EcsTaskPrefix =
+  | "SCRAPER"
+  | "PRICES"
+  | "WATCHER"
+  | "FORMATS"
+  | "OCR"
+  | "THUMBS";
+
+export function getEcsTaskConfig(prefix: EcsTaskPrefix): EcsTaskConfig | null {
   const cluster = process.env[`${prefix}_ECS_CLUSTER`];
   const taskDefinition = process.env[`${prefix}_ECS_TASK_DEFINITION`];
   const subnets = parseCsvEnv(`${prefix}_ECS_SUBNETS`);

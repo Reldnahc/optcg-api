@@ -53,7 +53,40 @@ async function runConfiguredTask(
 }
 
 export async function adminScraperRoutes(app: FastifyInstance) {
-  app.get("/scraper/status", async (_req, reply) => {
+  app.get("/stats", async () => {
+    const [totalCardsResult, cardsByLanguageResult, recentErrorsResult] = await Promise.all([
+      query<{ total: string }>(`SELECT COUNT(*) AS total FROM cards`),
+      query<{ language: string; count: string }>(
+        `SELECT language, COUNT(*) AS count
+         FROM cards
+         GROUP BY language
+         ORDER BY language ASC`,
+      ),
+      query<{ count: string }>(
+        `SELECT COUNT(*) AS count
+         FROM scrape_log
+         WHERE errors IS NOT NULL
+           AND btrim(errors) <> ''
+           AND ran_at >= NOW() - INTERVAL '7 days'`,
+      ),
+    ]);
+
+    return {
+      data: {
+        total_cards: parseInt(totalCardsResult.rows[0]?.total ?? "0", 10),
+        cards_by_language: cardsByLanguageResult.rows.map((row) => ({
+          language: row.language,
+          count: parseInt(row.count, 10),
+        })),
+        recent_errors: parseInt(recentErrorsResult.rows[0]?.count ?? "0", 10),
+      },
+    };
+  });
+
+  app.get("/scraper/status", async (req, reply) => {
+    const qs = req.query as Record<string, string>;
+    const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "50", 10)));
+
     const rows = await query<{
       id: string;
       ran_at: string;
@@ -66,17 +99,48 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       `SELECT id, ran_at, source, cards_added, cards_updated, errors, duration_ms
        FROM scrape_log
        ORDER BY ran_at DESC
-       LIMIT 50`,
+       LIMIT $1`,
+      [limit],
     );
 
     reply.header("Cache-Control", "no-store");
     return { data: rows.rows };
   });
 
-  app.get("/watcher/topics", async (_req, reply) => {
+  app.get("/scraper/logs", async (req, reply) => {
+    const qs = req.query as Record<string, string>;
+    const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "50", 10)));
+
+    const rows = await query<{
+      id: string;
+      ran_at: string;
+      source: string | null;
+      cards_added: number;
+      cards_updated: number;
+      errors: string | null;
+      duration_ms: number | null;
+    }>(
+      `SELECT id, ran_at, source, cards_added, cards_updated, errors, duration_ms
+       FROM scrape_log
+       ORDER BY ran_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+
+    reply.header("Cache-Control", "no-store");
+    return { data: rows.rows };
+  });
+
+  app.get("/watcher/topics", async (req, reply) => {
+    const qs = req.query as Record<string, string>;
+    const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "50", 10)));
+
     const rows = await query<Record<string, unknown>>(
       `SELECT *
-       FROM watched_topics`,
+       FROM watched_topics
+       ORDER BY seen_at DESC
+       LIMIT $1`,
+      [limit],
     );
 
     reply.header("Cache-Control", "no-store");

@@ -254,4 +254,56 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       return { error: { status: 501, message: error.message } };
     }
   });
+
+  app.post("/variant-merge/run", async (req, reply) => {
+    const body = (req.body ?? {}) as {
+      card_number?: unknown;
+      from_variant_index?: unknown;
+      to_variant_index?: unknown;
+      dry_run?: unknown;
+    };
+
+    const cardNumber = typeof body.card_number === "string" ? body.card_number.trim().toUpperCase() : "";
+    const fromVariantIndex = typeof body.from_variant_index === "number" && Number.isInteger(body.from_variant_index)
+      ? body.from_variant_index
+      : null;
+    const toVariantIndex = typeof body.to_variant_index === "number" && Number.isInteger(body.to_variant_index)
+      ? body.to_variant_index
+      : null;
+    const dryRun = body.dry_run === true;
+
+    if (!cardNumber) {
+      reply.code(400);
+      return { error: { status: 400, message: "card_number is required" } };
+    }
+    if (fromVariantIndex == null || fromVariantIndex < 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "from_variant_index must be a non-negative integer" } };
+    }
+    if (toVariantIndex == null || toVariantIndex < 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "to_variant_index must be a non-negative integer" } };
+    }
+    if (fromVariantIndex === toVariantIndex) {
+      reply.code(400);
+      return { error: { status: 400, message: "from_variant_index and to_variant_index must differ" } };
+    }
+
+    const command = [
+      "cli",
+      "merge-variant",
+      cardNumber,
+      String(fromVariantIndex),
+      String(toVariantIndex),
+      dryRun ? "--dry-run" : "--yes",
+    ];
+
+    try {
+      const result = await runConfiguredTask("VARIANT_MERGE", { command });
+      return { data: result };
+    } catch (error: any) {
+      reply.code(501);
+      return { error: { status: 501, message: error.message } };
+    }
+  });
 }

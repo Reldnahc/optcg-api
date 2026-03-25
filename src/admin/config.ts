@@ -47,7 +47,8 @@ export type EcsTaskPrefix =
   | "WATCHER"
   | "FORMATS"
   | "OCR"
-  | "THUMBS";
+  | "THUMBS"
+  | "VARIANT_MERGE";
 
 export function getEcsTaskConfig(prefix: EcsTaskPrefix): EcsTaskConfig | null {
   const cluster = process.env[`${prefix}_ECS_CLUSTER`];

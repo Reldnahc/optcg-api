@@ -59,6 +59,22 @@ async function getCardRecord(cardNumber: string, language: string) {
   return result.rows[0] ?? null;
 }
 
+async function getCardImageRecord(cardId: string, variantIndex: number) {
+  const result = await query<{
+    id: string;
+    variant_index: number;
+    label: string | null;
+  }>(
+    `SELECT id, variant_index, label
+     FROM card_images
+     WHERE card_id = $1 AND variant_index = $2
+     LIMIT 1`,
+    [cardId, variantIndex],
+  );
+
+  return result.rows[0] ?? null;
+}
+
 export async function adminCardsRoutes(app: FastifyInstance) {
   app.get("/cards", async (req, reply) => {
     const qs = req.query as Record<string, string>;
@@ -245,6 +261,95 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     return { data: formatCard(updated.rows[0]) };
   });
 
+  app.get("/cards/:card_number/tcgplayer-products", async (req, reply) => {
+    const { card_number } = req.params as { card_number: string };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+
+    const card = await getCardRecord(card_number, language);
+    if (!card) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    const variantsResult = await query<{
+      id: string;
+      variant_index: number;
+      label: string | null;
+    }>(
+      `SELECT id, variant_index, label
+       FROM card_images
+       WHERE card_id = $1
+       ORDER BY variant_index ASC`,
+      [card.id],
+    );
+
+    const variantIds = variantsResult.rows.map((row) => row.id);
+
+    const candidateResult = await query<{
+      id: string;
+      tcgplayer_product_id: number;
+      name: string;
+      sub_type: string | null;
+      tcgplayer_url: string | null;
+      image_url: string | null;
+      card_image_id: string | null;
+      linked_variant_index: number | null;
+      linked_card_number: string | null;
+      linked_language: string | null;
+    }>(
+      `SELECT tp.id,
+              tp.tcgplayer_product_id,
+              tp.name,
+              tp.sub_type,
+              tp.tcgplayer_url,
+              tp.image_url,
+              tp.card_image_id,
+              linked_ci.variant_index AS linked_variant_index,
+              linked_card.card_number AS linked_card_number,
+              linked_card.language AS linked_language
+       FROM tcgplayer_products tp
+       LEFT JOIN card_images linked_ci ON linked_ci.id = tp.card_image_id
+       LEFT JOIN cards linked_card ON linked_card.id = linked_ci.card_id
+       WHERE tp.product_type = 'card'
+         AND (
+           tp.ext_number ILIKE $1
+           OR tp.card_image_id IN (
+             SELECT id FROM card_images WHERE card_id = $2
+           )
+         )
+       ORDER BY
+         CASE
+           WHEN tp.card_image_id IN (
+             SELECT id FROM card_images WHERE card_id = $2
+           ) THEN 0
+           ELSE 1
+         END,
+         tp.tcgplayer_product_id ASC,
+         COALESCE(tp.sub_type, '') ASC`,
+      [card.card_number, card.id],
+    );
+
+    const linkedByVariantId = new Map<string, typeof candidateResult.rows>();
+    for (const candidate of candidateResult.rows) {
+      if (!candidate.card_image_id || !variantIds.includes(candidate.card_image_id)) continue;
+      const current = linkedByVariantId.get(candidate.card_image_id) ?? [];
+      current.push(candidate);
+      linkedByVariantId.set(candidate.card_image_id, current);
+    }
+
+    return {
+      data: {
+        variants: variantsResult.rows.map((variant) => ({
+          variant_index: variant.variant_index,
+          label: variant.label,
+          linked_products: linkedByVariantId.get(variant.id) ?? [],
+        })),
+        candidates: candidateResult.rows,
+      },
+    };
+  });
+
   app.delete("/cards/:card_number/images/:variant_index", async (req, reply) => {
     const { card_number, variant_index } = req.params as { card_number: string; variant_index: string };
     const qs = req.query as Record<string, string>;
@@ -397,6 +502,103 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     );
 
     return { data: updated.rows[0] };
+  });
+
+  app.put("/cards/:card_number/images/:variant_index/tcgplayer-products", async (req, reply) => {
+    const { card_number, variant_index } = req.params as { card_number: string; variant_index: string };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const variantIndex = parseInt(variant_index, 10);
+    const tcgplayerProductRowId = asOptionalString(body.tcgplayer_product_row_id, "tcgplayer_product_row_id");
+
+    if (!Number.isInteger(variantIndex) || variantIndex < 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "variant_index must be a non-negative integer" } };
+    }
+    if (!tcgplayerProductRowId) {
+      reply.code(400);
+      return { error: { status: 400, message: "tcgplayer_product_row_id is required" } };
+    }
+
+    const card = await getCardRecord(card_number, language);
+    if (!card) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    const image = await getCardImageRecord(card.id, variantIndex);
+    if (!image) {
+      reply.code(404);
+      return { error: { status: 404, message: "Image variant not found" } };
+    }
+
+    const updated = await query<{
+      id: string;
+      tcgplayer_product_id: number;
+      name: string;
+      sub_type: string | null;
+      tcgplayer_url: string | null;
+      card_image_id: string | null;
+    }>(
+      `UPDATE tcgplayer_products
+       SET card_image_id = $1, updated_at = NOW()
+       WHERE id = $2
+         AND product_type = 'card'
+       RETURNING id, tcgplayer_product_id, name, sub_type, tcgplayer_url, card_image_id`,
+      [image.id, tcgplayerProductRowId],
+    );
+
+    if (updated.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "TCGplayer product not found" } };
+    }
+
+    return { data: updated.rows[0] };
+  });
+
+  app.delete("/cards/:card_number/images/:variant_index/tcgplayer-products/:mapping_id", async (req, reply) => {
+    const { card_number, variant_index, mapping_id } = req.params as {
+      card_number: string;
+      variant_index: string;
+      mapping_id: string;
+    };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+    const variantIndex = parseInt(variant_index, 10);
+
+    if (!Number.isInteger(variantIndex) || variantIndex < 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "variant_index must be a non-negative integer" } };
+    }
+
+    const card = await getCardRecord(card_number, language);
+    if (!card) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    const image = await getCardImageRecord(card.id, variantIndex);
+    if (!image) {
+      reply.code(404);
+      return { error: { status: 404, message: "Image variant not found" } };
+    }
+
+    const updated = await query<{ id: string }>(
+      `UPDATE tcgplayer_products
+       SET card_image_id = NULL, updated_at = NOW()
+       WHERE id = $1
+         AND card_image_id = $2
+       RETURNING id`,
+      [mapping_id, image.id],
+    );
+
+    if (updated.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "Mapped TCGplayer product not found" } };
+    }
+
+    return { data: { unmapped: 1 } };
   });
 
   app.post("/cards/:card_number/images", async (req, reply) => {

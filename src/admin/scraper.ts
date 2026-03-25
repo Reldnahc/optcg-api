@@ -1,7 +1,31 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { ECSClient, RunTaskCommand } from "@aws-sdk/client-ecs";
+import { ECSClient, ListTasksCommand, RunTaskCommand } from "@aws-sdk/client-ecs";
 import { getEcsTaskConfig, type EcsTaskPrefix } from "./config.js";
+
+function getTaskFamily(taskDefinition: string): string {
+  const taskDefinitionPart = taskDefinition.split("/").pop() ?? taskDefinition;
+  return taskDefinitionPart.split(":")[0];
+}
+
+async function hasRunningTask(kind: EcsTaskPrefix): Promise<boolean> {
+  const config = getEcsTaskConfig(kind);
+  if (!config) return false;
+
+  const client = new ECSClient({});
+  const family = getTaskFamily(config.taskDefinition);
+  const result = await client.send(
+    new ListTasksCommand({
+      cluster: config.cluster,
+      family,
+      desiredStatus: "RUNNING",
+      launchType: "FARGATE",
+      maxResults: 1,
+    }),
+  );
+
+  return (result.taskArns?.length ?? 0) > 0;
+}
 
 async function runConfiguredTask(
   kind: EcsTaskPrefix,
@@ -152,6 +176,11 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     const language = typeof body.language === "string" ? body.language.trim() : "";
 
     try {
+      if (await hasRunningTask("SCRAPER")) {
+        reply.code(409);
+        return { error: { status: 409, message: "A scraper task is already running" } };
+      }
+
       const result = await runConfiguredTask("SCRAPER", {
         ...(language ? { command: ["scrape", "--lang", language] } : {}),
       });

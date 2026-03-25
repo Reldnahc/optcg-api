@@ -82,7 +82,7 @@ const FIELD_ALIASES: Record<string, string> = {
 };
 
 const OPERATOR_PATTERN = /^(>=|<=|!=|>|<|=|:)/;
-const IMPLICIT_SET_CODE_PATTERN = /^(?:OP\d{2}|ST\d{2}|PRB\d{2}|P\d{2,3})$/i;
+const IMPLICIT_SET_CODE_PATTERN = /^(?:OP\d{2}|ST\d{2}|EB\d{2}|PRB\d{2}|P\d{2,3})$/i;
 
 export function parseSearch(input: string): SearchNode {
   const tokens = tokenize(input);

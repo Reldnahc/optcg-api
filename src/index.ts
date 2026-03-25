@@ -18,6 +18,8 @@ import { adminAuth } from "./middleware/adminAuth.js";
 const app = Fastify({ logger: true });
 const adminOrigin = getAdminOrigin();
 const SLOW_REQUEST_MS = 1000;
+const RATE_LIMIT_WINDOW_MS = 15_000;
+const RATE_LIMIT_MAX_REQUESTS = 20;
 
 // Rate limiting — 60 req/min per IP
 const ipHits = new Map<string, { count: number; resetAt: number }>();
@@ -34,11 +36,11 @@ app.addHook("onRequest", async (req, reply) => {
   const now = Date.now();
   let entry = ipHits.get(ip);
   if (!entry || now > entry.resetAt) {
-    entry = { count: 0, resetAt: now + 60_000 };
+    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
     ipHits.set(ip, entry);
   }
   entry.count++;
-  if (entry.count > 60) {
+  if (entry.count > RATE_LIMIT_MAX_REQUESTS) {
     const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
     reply.header("Retry-After", retryAfter);
     reply.code(429).send({

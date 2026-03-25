@@ -304,6 +304,101 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     return { data: { deleted: existing.rows.length } };
   });
 
+  app.put("/cards/:card_number/images/:variant_index", async (req, reply) => {
+    const { card_number, variant_index } = req.params as { card_number: string; variant_index: string };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const variantIndex = parseInt(variant_index, 10);
+
+    if (!Number.isInteger(variantIndex) || variantIndex < 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "variant_index must be a non-negative integer" } };
+    }
+
+    const card = await getCardRecord(card_number, language);
+    if (!card) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    const existing = await query<{ id: string }>(
+      `SELECT id FROM card_images
+       WHERE card_id = $1 AND variant_index = $2
+       LIMIT 1`,
+      [card.id, variantIndex],
+    );
+
+    if (existing.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "Image variant not found" } };
+    }
+
+    const fields: Array<{ column: string; value: unknown }> = [];
+
+    try {
+      const label = asOptionalString(body.label, "label");
+      if (label !== undefined) fields.push({ column: "label", value: label });
+
+      const imageUrl = asOptionalString(body.image_url, "image_url");
+      if (imageUrl !== undefined) {
+        if (imageUrl === null) throw new Error("image_url cannot be null");
+        fields.push({ column: "image_url", value: imageUrl });
+      }
+
+      const scanUrl = asOptionalString(body.scan_url, "scan_url");
+      if (scanUrl !== undefined) fields.push({ column: "scan_url", value: scanUrl });
+
+      const sourceUrl = asOptionalString(body.source_url, "source_url");
+      if (sourceUrl !== undefined) fields.push({ column: "source_url", value: sourceUrl });
+
+      if (body.classified !== undefined) {
+        fields.push({ column: "classified", value: Boolean(body.classified) });
+      }
+
+      if (body.is_default !== undefined) {
+        fields.push({ column: "is_default", value: Boolean(body.is_default) });
+      }
+    } catch (error: any) {
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    }
+
+    if (fields.length === 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "No supported fields provided" } };
+    }
+
+    if (fields.some((field) => field.column === "is_default" && field.value === true)) {
+      await query(`UPDATE card_images SET is_default = false WHERE card_id = $1`, [card.id]);
+    }
+
+    const assignments = fields.map((field, index) => `${field.column} = $${index + 1}`);
+    const params = fields.map((field) => field.value);
+    params.push(card.id, variantIndex);
+
+    const updated = await query<{
+      id: string;
+      card_id: string;
+      product_id: string | null;
+      variant_index: number;
+      image_url: string | null;
+      source_url: string | null;
+      scan_url: string | null;
+      is_default: boolean;
+      label: string | null;
+      classified: boolean;
+    }>(
+      `UPDATE card_images
+       SET ${assignments.join(", ")}
+       WHERE card_id = $${params.length - 1} AND variant_index = $${params.length}
+       RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, is_default, label, classified`,
+      params,
+    );
+
+    return { data: updated.rows[0] };
+  });
+
   app.post("/cards/:card_number/images", async (req, reply) => {
     const { card_number } = req.params as { card_number: string };
     const qs = req.query as Record<string, string>;

@@ -82,6 +82,7 @@ const FIELD_ALIASES: Record<string, string> = {
 };
 
 const OPERATOR_PATTERN = /^(>=|<=|!=|>|<|=|:)/;
+const IMPLICIT_CARD_NUMBER_PATTERN = /^(?:(?:OP\d{2}|ST\d{2}|EB\d{2}|PRB\d{2})-\d{3}|P-\d{3})$/i;
 const IMPLICIT_SET_CODE_PATTERN = /^(?:OP\d{2}|ST\d{2}|EB\d{2}|PRB\d{2}|P\d{2,3})$/i;
 
 export function parseSearch(input: string): SearchNode {
@@ -162,6 +163,16 @@ function parseFilterToken(token: string): FilterNode | NameNode {
   // Quoted string → name search
   if (token.startsWith('"') && token.endsWith('"')) {
     return { type: "name", value: token.slice(1, -1), negated: false };
+  }
+
+  if (IMPLICIT_CARD_NUMBER_PATTERN.test(token)) {
+    return {
+      type: "filter",
+      field: "card_number",
+      operator: ":",
+      value: token.toUpperCase(),
+      negated: false,
+    };
   }
 
   if (IMPLICIT_SET_CODE_PATTERN.test(token)) {

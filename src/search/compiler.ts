@@ -190,6 +190,12 @@ function compileFilter(
       return negated ? `NOT (${sql})` : sql;
     }
 
+    case "card_number": {
+      const p = param(ctx, value.toUpperCase());
+      const sql = `c.card_number ILIKE ${p}`;
+      return negated ? `NOT (${sql})` : sql;
+    }
+
     case "set": {
       const p = param(ctx, value.toUpperCase());
       const sql = `c.true_set_code = ${p}`;

@@ -19,7 +19,6 @@ async function hasRunningTask(kind: EcsTaskPrefix): Promise<boolean> {
       cluster: config.cluster,
       family,
       desiredStatus: "RUNNING",
-      launchType: "FARGATE",
       maxResults: 1,
     }),
   );

@@ -186,6 +186,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       });
       return { data: result };
     } catch (error: any) {
+      req.log.error({ err: error, language }, "Failed to start scraper task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
@@ -201,6 +202,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       });
       return { data: result };
     } catch (error: any) {
+      req.log.error({ err: error, wipe }, "Failed to start prices task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
@@ -211,6 +213,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       const result = await runConfiguredTask("WATCHER");
       return { data: result };
     } catch (error: any) {
+      _req.log.error({ err: error }, "Failed to start watcher task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
@@ -221,6 +224,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       const result = await runConfiguredTask("FORMATS");
       return { data: result };
     } catch (error: any) {
+      _req.log.error({ err: error }, "Failed to start formats task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
@@ -240,6 +244,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       const result = await runConfiguredTask("OCR", { command });
       return { data: result };
     } catch (error: any) {
+      req.log.error({ err: error, command }, "Failed to start OCR task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
@@ -250,6 +255,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       const result = await runConfiguredTask("THUMBS");
       return { data: result };
     } catch (error: any) {
+      _req.log.error({ err: error }, "Failed to start thumbs task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }

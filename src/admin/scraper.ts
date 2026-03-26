@@ -202,16 +202,44 @@ export async function adminScraperRoutes(app: FastifyInstance) {
   });
 
   app.post("/prices/run", async (req, reply) => {
-    const body = (req.body ?? {}) as { wipe?: unknown };
+    const body = (req.body ?? {}) as {
+      wipe?: unknown;
+      archive_date?: unknown;
+      archive_from?: unknown;
+      archive_to?: unknown;
+    };
     const wipe = body.wipe === true;
+    const archiveDate = typeof body.archive_date === "string" ? body.archive_date.trim() : "";
+    const archiveFrom = typeof body.archive_from === "string" ? body.archive_from.trim() : "";
+    const archiveTo = typeof body.archive_to === "string" ? body.archive_to.trim() : "";
+
+    if (wipe && (archiveDate || archiveFrom || archiveTo)) {
+      reply.code(400);
+      return { error: { status: 400, message: "wipe cannot be combined with archive sync" } };
+    }
+    if (archiveDate && (archiveFrom || archiveTo)) {
+      reply.code(400);
+      return { error: { status: 400, message: "archive_date cannot be combined with archive_from/archive_to" } };
+    }
+    if ((archiveFrom && !archiveTo) || (!archiveFrom && archiveTo)) {
+      reply.code(400);
+      return { error: { status: 400, message: "archive_from and archive_to are required together" } };
+    }
+
+    const command = ["prices"];
+    if (wipe) {
+      command.push("--wipe");
+    } else if (archiveDate) {
+      command.push("--archive-date", archiveDate);
+    } else if (archiveFrom && archiveTo) {
+      command.push("--archive-from", archiveFrom, "--archive-to", archiveTo);
+    }
 
     try {
-      const result = await runConfiguredTask("PRICES", {
-        ...(wipe ? { command: ["prices", "--wipe"] } : {}),
-      });
+      const result = await runConfiguredTask("PRICES", { command });
       return { data: result };
     } catch (error: any) {
-      req.log.error({ err: error, wipe }, "Failed to start prices task");
+      req.log.error({ err: error, wipe, archiveDate, archiveFrom, archiveTo, command }, "Failed to start prices task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }

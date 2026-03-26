@@ -52,6 +52,18 @@ function squeezeRepeatedChars(value: string): string {
   return value.replace(/([a-z0-9])\1+/g, "$1");
 }
 
+function collectPositiveNameTerms(node: SearchNode): string[] {
+  switch (node.type) {
+    case "name":
+      return node.negated ? [] : [node.value];
+    case "filter":
+      return [];
+    case "and":
+    case "or":
+      return node.children.flatMap(collectPositiveNameTerms);
+  }
+}
+
 export async function cardsRoutes(app: FastifyInstance) {
   // GET /v1/cards — search/list
   app.get("/cards", async (req, reply) => {
@@ -65,6 +77,8 @@ export async function cardsRoutes(app: FastifyInstance) {
     // Inline order:/dir: from q= override query params
     let sortKey = qs.sort || "card_number";
     let order = qs.order === "desc" ? "DESC" : "ASC";
+    let inlineSortProvided = false;
+    let sequentialNameQuery = "";
 
     const conditions: string[] = ["c.language = $1"];
     const params: unknown[] = [lang];
@@ -130,8 +144,10 @@ export async function cardsRoutes(app: FastifyInstance) {
         const ast = parseSearch(qs.q);
         // Extract inline sort/direction before compiling
         const inlineSort = extractInlineSort(ast);
+        inlineSortProvided = Boolean(inlineSort.order);
         if (inlineSort.order) sortKey = inlineSort.order;
         if (inlineSort.direction) order = inlineSort.direction === "desc" ? "DESC" : "ASC";
+        sequentialNameQuery = collectPositiveNameTerms(ast).join(" ").trim();
         const compiled = compileSearch(ast, paramIdx, unique);
         if (compiled.sql) {
           conditions.push(compiled.sql);
@@ -157,6 +173,44 @@ export async function cardsRoutes(app: FastifyInstance) {
 
     const where = conditions.join(" AND ");
     const needsPriceJoin = sortKey === "market_price";
+    const useSearchRank = Boolean(qs.q) && !qs.sort && !inlineSortProvided && Boolean(sequentialNameQuery);
+
+    let searchRankSql: string | null = null;
+    if (useSearchRank) {
+      const normalizedCardNameSql = `regexp_replace(lower(COALESCE(c.name, '')), '[^a-z0-9]+', '', 'g')`;
+      const squeezedCardNameSql = `regexp_replace(${normalizedCardNameSql}, '([a-z0-9])\\1+', '\\1', 'g')`;
+      const normalizedSequentialNameQuery = normalizeSearchText(sequentialNameQuery);
+      const squeezedSequentialNameQuery = squeezeRepeatedChars(normalizedSequentialNameQuery);
+
+      const rawExactParam = `$${paramIdx++}`;
+      params.push(sequentialNameQuery);
+      const normalizedExactParam = `$${paramIdx++}`;
+      params.push(normalizedSequentialNameQuery);
+      const rawPrefixParam = `$${paramIdx++}`;
+      params.push(`${sequentialNameQuery}%`);
+      const normalizedPrefixParam = `$${paramIdx++}`;
+      params.push(`${normalizedSequentialNameQuery}%`);
+      const rawContainsParam = `$${paramIdx++}`;
+      params.push(`%${sequentialNameQuery}%`);
+      const normalizedContainsParam = `$${paramIdx++}`;
+      params.push(`%${normalizedSequentialNameQuery}%`);
+      const squeezedContainsParam = `$${paramIdx++}`;
+      params.push(`%${squeezedSequentialNameQuery}%`);
+
+      searchRankSql = `CASE
+        WHEN lower(COALESCE(c.name, '')) = lower(${rawExactParam}) THEN 700
+        WHEN ${normalizedCardNameSql} = ${normalizedExactParam} THEN 650
+        WHEN c.name ILIKE ${rawPrefixParam} THEN 600
+        WHEN ${normalizedCardNameSql} LIKE ${normalizedPrefixParam} THEN 550
+        WHEN c.name ILIKE ${rawContainsParam} THEN 500
+        WHEN ${normalizedCardNameSql} LIKE ${normalizedContainsParam} THEN 450
+        WHEN ${squeezedCardNameSql} LIKE ${squeezedContainsParam} THEN 400
+        ELSE 0
+      END`;
+    }
+    const primaryOrderSql = useSearchRank && searchRankSql
+      ? `${searchRankSql} DESC, ${sortCol} ${order} NULLS LAST`
+      : `${sortCol} ${order} NULLS LAST`;
 
     const priceJoin = `LEFT JOIN LATERAL (
          SELECT tp.tcgplayer_product_id, pr.market_price
@@ -194,7 +248,7 @@ export async function cardsRoutes(app: FastifyInstance) {
            LEFT JOIN products ip ON ip.id = ci.product_id
            ${needsPriceJoin ? priceJoin : ""}
            WHERE ${where}
-           ORDER BY ${sortCol} ${order} NULLS LAST, c.card_number ASC, ci.variant_index ASC
+           ORDER BY ${primaryOrderSql}, c.card_number ASC, ci.variant_index ASC
            LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
           [...params, limit, offset],
         ),
@@ -234,7 +288,7 @@ export async function cardsRoutes(app: FastifyInstance) {
          ) ci_default ON true
          ${needsPriceJoin ? priceJoin : ""}
          WHERE ${where}
-         ORDER BY ${sortCol} ${order} NULLS LAST, c.card_number ASC
+         ORDER BY ${primaryOrderSql}, c.card_number ASC
          LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
         [...params, limit, offset],
       ),

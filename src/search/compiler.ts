@@ -4,10 +4,15 @@
 
 import { SearchNode, Operator } from "./parser.js";
 import { requireCardRarity } from "../rarity.js";
+import { artistFilterSql, normalizedArtistFilterSql } from "../artist.js";
 
 export interface CompiledSearch {
   sql: string;
   params: unknown[];
+}
+
+export interface CompileSearchOptions {
+  hasImageArtist?: boolean;
 }
 
 const COLOR_MAP: Record<string, string> = {
@@ -32,8 +37,9 @@ export function compileSearch(
   node: SearchNode,
   startIdx: number,
   unique: string = "cards",
+  options: CompileSearchOptions = {},
 ): CompiledSearch {
-  const ctx = { idx: startIdx, params: [] as unknown[], unique };
+  const ctx = { idx: startIdx, params: [] as unknown[], unique, hasImageArtist: options.hasImageArtist ?? false };
   const sql = compileNode(node, ctx);
   return { sql, params: ctx.params };
 }
@@ -42,6 +48,7 @@ interface Ctx {
   idx: number;
   params: unknown[];
   unique: string;
+  hasImageArtist: boolean;
 }
 
 function param(ctx: Ctx, value: unknown): string {
@@ -62,11 +69,11 @@ function squeezeRepeatedChars(value: string): string {
 }
 
 function artistSearchSql(pattern: string, ctx: Ctx): string {
-  return `c.artist ILIKE ${pattern}`;
+  return artistFilterSql(pattern, ctx.unique, ctx.hasImageArtist);
 }
 
 function normalizedArtistSearchSql(pattern: string, ctx: Ctx): string {
-  return `${normalizedTextSql("c.artist")} LIKE ${pattern}`;
+  return normalizedArtistFilterSql(pattern, ctx.unique, ctx.hasImageArtist);
 }
 
 function compileNode(node: SearchNode, ctx: Ctx): string {

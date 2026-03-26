@@ -17,16 +17,26 @@ export function labelOrder(label: string | null): number {
   return LABEL_ORDER[label] ?? 99;
 }
 
-/** SQL CASE expression for ordering by label priority. Use in ORDER BY or subquery. */
-export const LABEL_ORDER_SQL = `CASE label
+export function labelOrderSql(alias?: string): string {
+  const labelExpr = alias ? `${alias}.label` : "label";
+  return `CASE ${labelExpr}
   ${Object.entries(LABEL_ORDER).map(([l, i]) => `WHEN '${l}' THEN ${i}`).join(" ")}
   ELSE 99 END`;
+}
+
+/** SQL CASE expression for ordering by label priority. Use in ORDER BY or subquery. */
+export const LABEL_ORDER_SQL = labelOrderSql();
 
 /** SQL subquery to get the best image_url for a card (by label priority). Bind card id column. */
 export function bestImageSubquery(cardIdExpr: string): string {
-  return `(SELECT ci.image_url FROM card_images ci
+  return bestImageFieldSubquery(cardIdExpr, "image_url");
+}
+
+/** SQL subquery to get a single field from the best classified image for a card. */
+export function bestImageFieldSubquery(cardIdExpr: string, field: string): string {
+  return `(SELECT ci.${field} FROM card_images ci
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
-    ORDER BY ${LABEL_ORDER_SQL} LIMIT 1)`;
+    ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
 }
 
 export function thumbnailUrl(imageUrl: string | null): string | null {

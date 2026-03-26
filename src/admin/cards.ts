@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { bestImageSubquery, formatCard, CardRow } from "../format.js";
+import { bestImageFieldSubquery, bestImageSubquery, formatCard, CardRow } from "../format.js";
 import { normalizeCardRarity } from "../rarity.js";
 
 const CARD_TYPES = new Set(["Leader", "Character", "Event", "Stage"]);
@@ -48,7 +48,8 @@ function asOptionalStringArray(
 async function getCardRecord(cardNumber: string, language: string) {
   const result = await query<CardRow & { image_url: string | null }>(
     `SELECT c.*, p.name AS product_name, p.released_at,
-            ${bestImageSubquery("c.id")} AS image_url
+            ${bestImageSubquery("c.id")} AS image_url,
+            ${bestImageFieldSubquery("c.id", "artist")} AS artist
      FROM cards c
      JOIN products p ON p.id = c.product_id
      WHERE c.card_number ILIKE $1 AND c.language = $2
@@ -125,6 +126,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       query<CardRow & { image_url: string | null; image_count: string }>(
         `SELECT c.*, p.name AS product_name, p.released_at,
                 ${bestImageSubquery("c.id")} AS image_url,
+                ${bestImageFieldSubquery("c.id", "artist")} AS artist,
                 (SELECT COUNT(*) FROM card_images ci WHERE ci.card_id = c.id) AS image_count
          FROM cards c
          JOIN products p ON p.id = c.product_id
@@ -223,8 +225,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const block = asOptionalString(body.block, "block");
       if (block !== undefined) fields.push({ column: "block", value: block });
 
-      const artist = asOptionalString(body.artist, "artist");
-      if (artist !== undefined) fields.push({ column: "artist", value: artist });
     } catch (error: any) {
       reply.code(400);
       return { error: { status: 400, message: error.message } };
@@ -247,7 +247,8 @@ export async function adminCardsRoutes(app: FastifyInstance) {
          RETURNING *
        )
        SELECT updated.*, p.name AS product_name, p.released_at,
-              ${bestImageSubquery("updated.id")} AS image_url
+              ${bestImageSubquery("updated.id")} AS image_url,
+              ${bestImageFieldSubquery("updated.id", "artist")} AS artist
        FROM updated
        JOIN products p ON p.id = updated.product_id`,
       params,
@@ -276,8 +277,9 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       id: string;
       variant_index: number;
       label: string | null;
+      artist: string | null;
     }>(
-      `SELECT id, variant_index, label
+      `SELECT id, variant_index, label, artist
        FROM card_images
        WHERE card_id = $1
        ORDER BY variant_index ASC`,
@@ -343,6 +345,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         variants: variantsResult.rows.map((variant) => ({
           variant_index: variant.variant_index,
           label: variant.label,
+          artist: variant.artist,
           linked_products: linkedByVariantId.get(variant.id) ?? [],
         })),
         candidates: candidateResult.rows,
@@ -457,6 +460,9 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const sourceUrl = asOptionalString(body.source_url, "source_url");
       if (sourceUrl !== undefined) fields.push({ column: "source_url", value: sourceUrl });
 
+      const artist = asOptionalString(body.artist, "artist");
+      if (artist !== undefined) fields.push({ column: "artist", value: artist });
+
       if (body.classified !== undefined) {
         fields.push({ column: "classified", value: Boolean(body.classified) });
       }
@@ -490,6 +496,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       image_url: string | null;
       source_url: string | null;
       scan_url: string | null;
+      artist: string | null;
       is_default: boolean;
       label: string | null;
       classified: boolean;
@@ -497,7 +504,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       `UPDATE card_images
        SET ${assignments.join(", ")}
        WHERE card_id = $${params.length - 1} AND variant_index = $${params.length}
-       RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, is_default, label, classified`,
+       RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, is_default, label, classified`,
       params,
     );
 
@@ -620,6 +627,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const sourceUrl = asOptionalString(body.source_url, "source_url") ?? null;
       const scanUrl = asOptionalString(body.scan_url, "scan_url") ?? null;
       const label = asOptionalString(body.label, "label") ?? null;
+      const artist = asOptionalString(body.artist, "artist") ?? null;
       const productId = asOptionalString(body.product_id, "product_id") ?? null;
       const classified = body.classified === undefined ? true : Boolean(body.classified);
       const isDefault = body.is_default === undefined ? false : Boolean(body.is_default);
@@ -661,16 +669,17 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         image_url: string;
         source_url: string | null;
         scan_url: string | null;
+        artist: string | null;
         is_default: boolean;
         label: string | null;
         classified: boolean;
       }>(
         `INSERT INTO card_images (
-           card_id, product_id, variant_index, image_url, source_url, scan_url, is_default, label, classified
+           card_id, product_id, variant_index, image_url, source_url, scan_url, artist, is_default, label, classified
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, is_default, label, classified`,
-        [card.id, productId, variantIndex, imageUrl, sourceUrl, scanUrl, isDefault, label, classified],
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, is_default, label, classified`,
+        [card.id, productId, variantIndex, imageUrl, sourceUrl, scanUrl, artist, isDefault, label, classified],
       );
 
       return { data: inserted.rows[0] };

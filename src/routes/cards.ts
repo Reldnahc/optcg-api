@@ -165,15 +165,26 @@ export async function cardsRoutes(app: FastifyInstance) {
     if (sortKey === "number") sortKey = "card_number";
     if (sortKey === "set") sortKey = "card_number";
     if (sortKey === "usd") sortKey = "market_price";
-    const sortCol = VALID_SORTS[sortKey];
-    if (!sortCol) {
+    const wantsRelevanceSort = sortKey === "relevance";
+    if (wantsRelevanceSort && !qs.q) {
+      reply.code(400);
+      return { error: { status: 400, message: "Relevance sort requires q" } };
+    }
+    const sortCol = wantsRelevanceSort ? null : VALID_SORTS[sortKey];
+    if (!wantsRelevanceSort && !sortCol) {
       reply.code(400);
       return { error: { status: 400, message: `Invalid sort: ${sortKey}` } };
     }
 
     const where = conditions.join(" AND ");
     const needsPriceJoin = sortKey === "market_price";
-    const useSearchRank = Boolean(qs.q) && !qs.sort && !inlineSortProvided && Boolean(sequentialNameQuery);
+    const useSearchRank = Boolean(qs.q)
+      && Boolean(sequentialNameQuery)
+      && (wantsRelevanceSort || (!qs.sort && !inlineSortProvided));
+
+    const filterParams = [...params];
+    const rowParams = [...params];
+    let rowParamIdx = paramIdx;
 
     let searchRankSql: string | null = null;
     if (useSearchRank) {
@@ -182,20 +193,20 @@ export async function cardsRoutes(app: FastifyInstance) {
       const normalizedSequentialNameQuery = normalizeSearchText(sequentialNameQuery);
       const squeezedSequentialNameQuery = squeezeRepeatedChars(normalizedSequentialNameQuery);
 
-      const rawExactParam = `$${paramIdx++}`;
-      params.push(sequentialNameQuery);
-      const normalizedExactParam = `$${paramIdx++}`;
-      params.push(normalizedSequentialNameQuery);
-      const rawPrefixParam = `$${paramIdx++}`;
-      params.push(`${sequentialNameQuery}%`);
-      const normalizedPrefixParam = `$${paramIdx++}`;
-      params.push(`${normalizedSequentialNameQuery}%`);
-      const rawContainsParam = `$${paramIdx++}`;
-      params.push(`%${sequentialNameQuery}%`);
-      const normalizedContainsParam = `$${paramIdx++}`;
-      params.push(`%${normalizedSequentialNameQuery}%`);
-      const squeezedContainsParam = `$${paramIdx++}`;
-      params.push(`%${squeezedSequentialNameQuery}%`);
+      const rawExactParam = `$${rowParamIdx++}`;
+      rowParams.push(sequentialNameQuery);
+      const normalizedExactParam = `$${rowParamIdx++}`;
+      rowParams.push(normalizedSequentialNameQuery);
+      const rawPrefixParam = `$${rowParamIdx++}`;
+      rowParams.push(`${sequentialNameQuery}%`);
+      const normalizedPrefixParam = `$${rowParamIdx++}`;
+      rowParams.push(`${normalizedSequentialNameQuery}%`);
+      const rawContainsParam = `$${rowParamIdx++}`;
+      rowParams.push(`%${sequentialNameQuery}%`);
+      const normalizedContainsParam = `$${rowParamIdx++}`;
+      rowParams.push(`%${normalizedSequentialNameQuery}%`);
+      const squeezedContainsParam = `$${rowParamIdx++}`;
+      rowParams.push(`%${squeezedSequentialNameQuery}%`);
 
       searchRankSql = `CASE
         WHEN lower(COALESCE(c.name, '')) = lower(${rawExactParam}) THEN 700
@@ -209,7 +220,7 @@ export async function cardsRoutes(app: FastifyInstance) {
       END`;
     }
     const primaryOrderSql = useSearchRank && searchRankSql
-      ? `${searchRankSql} DESC, ${sortCol} ${order} NULLS LAST`
+      ? `${searchRankSql} DESC`
       : `${sortCol} ${order} NULLS LAST`;
 
     const priceJoin = `LEFT JOIN LATERAL (
@@ -236,7 +247,7 @@ export async function cardsRoutes(app: FastifyInstance) {
            JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true
            LEFT JOIN products ip ON ip.id = ci.product_id
            WHERE ${where}`,
-          params,
+          filterParams,
         ),
         query<CardRow & { image_url: string | null; label: string | null; variant_index: number; variant_product_name: string | null }>(
           `SELECT c.*, p.name AS product_name, p.released_at,
@@ -249,8 +260,8 @@ export async function cardsRoutes(app: FastifyInstance) {
            ${needsPriceJoin ? priceJoin : ""}
            WHERE ${where}
            ORDER BY ${primaryOrderSql}, c.card_number ASC, ci.variant_index ASC
-           LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
-          [...params, limit, offset],
+           LIMIT $${rowParamIdx} OFFSET $${rowParamIdx + 1}`,
+          [...rowParams, limit, offset],
         ),
       ]);
       const total = parseInt(countResult.rows[0].total, 10);
@@ -274,7 +285,7 @@ export async function cardsRoutes(app: FastifyInstance) {
          FROM cards c
          JOIN products p ON p.id = c.product_id
          WHERE ${where}`,
-        params,
+        filterParams,
       ),
       query<CardRow & { image_url: string | null }>(
         `SELECT c.*, p.name AS product_name, p.released_at, ci_default.image_url
@@ -289,8 +300,8 @@ export async function cardsRoutes(app: FastifyInstance) {
          ${needsPriceJoin ? priceJoin : ""}
          WHERE ${where}
          ORDER BY ${primaryOrderSql}, c.card_number ASC
-         LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`,
-        [...params, limit, offset],
+         LIMIT $${rowParamIdx} OFFSET $${rowParamIdx + 1}`,
+        [...rowParams, limit, offset],
       ),
     ]);
     const total = parseInt(countResult.rows[0].total, 10);

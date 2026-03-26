@@ -17,7 +17,7 @@ function extractInlineSort(node: SearchNode): { order?: string; direction?: stri
   }
   return result;
 }
-import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, setName, thumbnailUrl } from "../format.js";
+import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, bestImageFieldSubquery, setName, thumbnailUrl } from "../format.js";
 
 const VALID_SORTS: Record<string, string> = {
   name: "c.name",
@@ -27,7 +27,6 @@ const VALID_SORTS: Record<string, string> = {
   released: "p.released_at",
   rarity: CARD_RARITY_ORDER_SQL,
   color: "c.color[1]",
-  artist: "c.artist",
   market_price: "latest_price.market_price",
 };
 
@@ -170,7 +169,11 @@ export async function cardsRoutes(app: FastifyInstance) {
       reply.code(400);
       return { error: { status: 400, message: "Relevance sort requires q" } };
     }
-    const sortCol = wantsRelevanceSort ? null : VALID_SORTS[sortKey];
+    const sortCol = wantsRelevanceSort
+      ? null
+      : sortKey === "artist"
+        ? "c.artist"
+        : VALID_SORTS[sortKey];
     if (!wantsRelevanceSort && !sortCol) {
       reply.code(400);
       return { error: { status: 400, message: `Invalid sort: ${sortKey}` } };
@@ -289,15 +292,10 @@ export async function cardsRoutes(app: FastifyInstance) {
         filterParams,
       ),
       query<CardRow & { image_url: string | null }>(
-        `SELECT c.*, p.name AS product_name, p.released_at, ci_default.image_url
+        `SELECT c.*, p.name AS product_name, p.released_at,
+                ${bestImageFieldSubquery("c.id", "image_url")} AS image_url
          FROM cards c
          JOIN products p ON p.id = c.product_id
-         LEFT JOIN LATERAL (
-           SELECT image_url FROM card_images
-           WHERE card_id = c.id AND classified = true
-           ORDER BY ${LABEL_ORDER_SQL}
-           LIMIT 1
-         ) ci_default ON true
          ${needsPriceJoin ? priceJoin : ""}
          WHERE ${where}
          ORDER BY ${primaryOrderSql}, c.card_number ASC

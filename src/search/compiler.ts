@@ -61,6 +61,14 @@ function squeezeRepeatedChars(value: string): string {
   return value.replace(/([a-z0-9])\1+/g, "$1");
 }
 
+function artistSearchSql(pattern: string, ctx: Ctx): string {
+  return `c.artist ILIKE ${pattern}`;
+}
+
+function normalizedArtistSearchSql(pattern: string, ctx: Ctx): string {
+  return `${normalizedTextSql("c.artist")} LIKE ${pattern}`;
+}
+
 function compileNode(node: SearchNode, ctx: Ctx): string {
   switch (node.type) {
     case "name":
@@ -105,7 +113,7 @@ function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
     OR c.card_type ILIKE ${raw}
     OR c.effect ILIKE ${raw}
     OR c.trigger ILIKE ${raw}
-    OR c.artist ILIKE ${raw}
+    OR ${artistSearchSql(raw, ctx)}
     OR c.true_set_code ILIKE ${raw}
     OR p.name ILIKE ${raw}
     OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE t ILIKE ${raw})
@@ -119,7 +127,7 @@ function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
     OR ${normalizedTextSql("c.card_type")} LIKE ${normalized}
     OR ${normalizedTextSql("c.effect")} LIKE ${normalized}
     OR ${normalizedTextSql("c.trigger")} LIKE ${normalized}
-    OR ${normalizedTextSql("c.artist")} LIKE ${normalized}
+    OR ${normalizedArtistSearchSql(normalized, ctx)}
     OR ${normalizedTextSql("c.true_set_code")} LIKE ${normalized}
     OR ${normalizedTextSql("p.name")} LIKE ${normalized}
     OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE ${normalizedTextSql("t")} LIKE ${normalized})
@@ -223,7 +231,7 @@ function compileFilter(
 
     case "artist": {
       const p = param(ctx, `%${value}%`);
-      const sql = `c.artist ILIKE ${p}`;
+      const sql = artistSearchSql(p, ctx);
       return negated ? `NOT (${sql})` : sql;
     }
 

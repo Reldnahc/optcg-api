@@ -93,6 +93,31 @@ npm run build    # tsc
 npm start        # node dist/index.js
 ```
 
+## Git Workflow
+
+- Do not work directly on `main` by default.
+- Start each task on a short-lived feature branch unless the user explicitly says to stay on `main`.
+- Do not commit unless the user explicitly asks for `commit`.
+- Do not push unless the user explicitly asks for `push`.
+- Prefer opening a PR instead of merging directly to `main`.
+- GitHub CLI (`gh`) is installed and should be used for branch/PR workflow when needed.
+
+### Expected Flow
+
+1. Create or switch to a task branch.
+2. Implement the change and verify it locally.
+3. Commit only when the user says `commit`.
+4. Push the branch only when the user says `push`.
+5. Open a PR only when the user says `open pr` or otherwise explicitly asks for a PR.
+
+### Example Commands
+
+```bash
+git checkout -b search-regression-tests
+git push -u origin search-regression-tests
+gh pr create --fill
+```
+
 ## Planned: Admin Routes
 
 Admin routes will live under `/admin/*` and require JWT authentication. They are consumed by the admin panel (`optcg-admin` repo) at `admin.poneglyph.one`. See `optcg-admin/AGENTS.md` for the frontend spec and full API contract.

@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { bestImageFieldSubquery, bestImageSubquery, formatCard, CardRow } from "../format.js";
+import { bestArtistSubquery, bestImageSubquery, formatCard, CardRow } from "../format.js";
 import { normalizeCardRarity } from "../rarity.js";
 
 const CARD_TYPES = new Set(["Leader", "Character", "Event", "Stage"]);
@@ -49,7 +49,7 @@ async function getCardRecord(cardNumber: string, language: string) {
   const result = await query<CardRow & { image_url: string | null }>(
     `SELECT c.*, p.name AS product_name, p.released_at,
             ${bestImageSubquery("c.id")} AS image_url,
-            ${bestImageFieldSubquery("c.id", "artist")} AS artist
+            ${bestArtistSubquery("c.id")} AS artist
      FROM cards c
      JOIN products p ON p.id = c.product_id
      WHERE c.card_number ILIKE $1 AND c.language = $2
@@ -126,7 +126,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       query<CardRow & { image_url: string | null; image_count: string }>(
         `SELECT c.*, p.name AS product_name, p.released_at,
                 ${bestImageSubquery("c.id")} AS image_url,
-                ${bestImageFieldSubquery("c.id", "artist")} AS artist,
+                ${bestArtistSubquery("c.id")} AS artist,
                 (SELECT COUNT(*) FROM card_images ci WHERE ci.card_id = c.id) AS image_count
          FROM cards c
          JOIN products p ON p.id = c.product_id
@@ -248,7 +248,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
        )
        SELECT updated.*, p.name AS product_name, p.released_at,
               ${bestImageSubquery("updated.id")} AS image_url,
-              ${bestImageFieldSubquery("updated.id", "artist")} AS artist
+              ${bestArtistSubquery("updated.id")} AS artist
        FROM updated
        JOIN products p ON p.id = updated.product_id`,
       params,

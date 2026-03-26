@@ -3,7 +3,7 @@ import { query } from "optcg-db/db/client.js";
 import { parseSearch, SearchNode } from "../search/parser.js";
 import { compileSearch } from "../search/compiler.js";
 import { CARD_RARITY_ORDER_SQL, normalizeCardRarity } from "../rarity.js";
-import { artistFilterSql, artistSortSql, hasCardImageArtistColumn } from "../artist.js";
+import { artistFilterSql, artistSortSql } from "../artist.js";
 
 /** Extract order:/direction: values from the AST and return them */
 function extractInlineSort(node: SearchNode): { order?: string; direction?: string } {
@@ -18,7 +18,7 @@ function extractInlineSort(node: SearchNode): { order?: string; direction?: stri
   }
   return result;
 }
-import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, bestImageFieldSubquery, setName, thumbnailUrl } from "../format.js";
+import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, bestArtistSubquery, bestImageSubquery, setName, thumbnailUrl } from "../format.js";
 
 const VALID_SORTS: Record<string, string> = {
   name: "c.name",
@@ -68,7 +68,6 @@ export async function cardsRoutes(app: FastifyInstance) {
   // GET /v1/cards — search/list
   app.get("/cards", async (req, reply) => {
     const qs = req.query as Record<string, string>;
-    const hasImageArtist = await hasCardImageArtistColumn();
 
     const page = Math.max(1, parseInt(qs.page || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "20", 10)));
@@ -133,7 +132,7 @@ export async function cardsRoutes(app: FastifyInstance) {
       paramIdx++;
     }
     if (qs.artist) {
-      conditions.push(artistFilterSql(`$${paramIdx}`, unique, hasImageArtist));
+      conditions.push(artistFilterSql(`$${paramIdx}`, unique));
       params.push(`%${qs.artist}%`);
       paramIdx++;
     }
@@ -148,7 +147,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         if (inlineSort.order) sortKey = inlineSort.order;
         if (inlineSort.direction) order = inlineSort.direction === "desc" ? "DESC" : "ASC";
         sequentialNameQuery = collectPositiveNameTerms(ast).join(" ").trim();
-        const compiled = compileSearch(ast, paramIdx, unique, { hasImageArtist });
+        const compiled = compileSearch(ast, paramIdx, unique);
         if (compiled.sql) {
           conditions.push(compiled.sql);
           params.push(...compiled.params);
@@ -173,7 +172,7 @@ export async function cardsRoutes(app: FastifyInstance) {
     const sortCol = wantsRelevanceSort
       ? null
       : sortKey === "artist"
-        ? artistSortSql(unique, hasImageArtist)
+        ? artistSortSql(unique)
         : VALID_SORTS[sortKey];
     if (!wantsRelevanceSort && !sortCol) {
       reply.code(400);
@@ -257,7 +256,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         query<CardRow & { image_url: string | null; label: string | null; variant_index: number; variant_product_name: string | null }>(
           `SELECT c.*, p.name AS product_name, p.released_at,
                   ci.image_url, ci.label, ci.variant_index,
-                  ${hasImageArtist ? "ci.artist" : "c.artist AS artist"},
+                  ci.artist,
                   ip.name AS variant_product_name
            FROM cards c
            JOIN products p ON p.id = c.product_id
@@ -295,8 +294,8 @@ export async function cardsRoutes(app: FastifyInstance) {
       ),
       query<CardRow & { image_url: string | null }>(
         `SELECT c.*, p.name AS product_name, p.released_at,
-                ${bestImageFieldSubquery("c.id", "image_url")} AS image_url,
-                ${hasImageArtist ? bestImageFieldSubquery("c.id", "artist") : "c.artist AS artist"}
+                ${bestImageSubquery("c.id")} AS image_url,
+                ${bestArtistSubquery("c.id")} AS artist
          FROM cards c
          JOIN products p ON p.id = c.product_id
          ${needsPriceJoin ? priceJoin : ""}
@@ -378,11 +377,10 @@ export async function cardsRoutes(app: FastifyInstance) {
     const { card_number } = req.params as { card_number: string };
     const qs = req.query as Record<string, string>;
     const lang = qs.lang || "en";
-    const hasImageArtist = await hasCardImageArtistColumn();
 
     const cardResult = await query<CardRow & { set_product_name: string | null }>(
       `SELECT c.*, p.name AS product_name, p.released_at,
-              ${hasImageArtist ? bestImageFieldSubquery("c.id", "artist") : "c.artist AS artist"},
+              ${bestArtistSubquery("c.id")} AS artist,
               (SELECT p2.name FROM products p2
                WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
                LIMIT 1) AS set_product_name
@@ -421,7 +419,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         sub_type: string | null;
       }>(
         `SELECT ci.variant_index, ci.image_url, ci.scan_url,
-                ${hasImageArtist ? "ci.artist" : "c.artist AS artist"},
+                ci.artist,
                 ci.label, ci.classified, ci.is_default,
                 ip.name AS product_name, ip.released_at AS product_released_at,
                 canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,

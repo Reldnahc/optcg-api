@@ -7,7 +7,8 @@ export const LABEL_ORDER: Record<string, number> = {
   "Full Art": 4,
   Winner: 5,
   "Alternate Art": 6,
-  "SP Card": 7,
+  SP: 7,
+  TR: 7,
   "Manga Art": 8,
   Promo: 9,
 };
@@ -29,14 +30,21 @@ export const LABEL_ORDER_SQL = labelOrderSql();
 
 /** SQL subquery to get the best image_url for a card (by label priority). Bind card id column. */
 export function bestImageSubquery(cardIdExpr: string): string {
-  return bestImageFieldSubquery(cardIdExpr, "image_url");
-}
-
-/** SQL subquery to get a single field from the best classified image for a card. */
-export function bestImageFieldSubquery(cardIdExpr: string, field: string): string {
-  return `(SELECT ci.${field} FROM card_images ci
+  return `(SELECT ci.image_url FROM card_images ci
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
     ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
+}
+
+/** SQL subquery to get the most relevant non-null artist for a card. */
+export function bestArtistSubquery(cardIdExpr: string): string {
+  return `(SELECT ci.artist FROM card_images ci
+    WHERE ci.card_id = ${cardIdExpr}
+    ORDER BY
+      CASE WHEN NULLIF(BTRIM(COALESCE(ci.artist, '')), '') IS NULL THEN 1 ELSE 0 END,
+      ci.is_default DESC,
+      ${labelOrderSql("ci")},
+      ci.variant_index
+    LIMIT 1)`;
 }
 
 export function thumbnailUrl(imageUrl: string | null): string | null {

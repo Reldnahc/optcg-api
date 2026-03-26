@@ -20,6 +20,7 @@ const adminOrigin = getAdminOrigin();
 const SLOW_REQUEST_MS = 1000;
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || "10000", 10);
 const RATE_LIMIT_MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "120", 10);
+const LOCAL_ADMIN_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 
 // Rate limiting — 60 req/min per IP
 const ipHits = new Map<string, { count: number; resetAt: number }>();
@@ -72,7 +73,7 @@ app.addHook("onResponse", async (req, reply) => {
 // CORS — open
 app.addHook("onSend", async (req, reply) => {
   const origin = req.headers.origin;
-  const allowAdminMethods = !origin || origin === adminOrigin;
+  const allowAdminMethods = !origin || origin === adminOrigin || LOCAL_ADMIN_ORIGIN_RE.test(origin);
 
   reply.header("Vary", "Origin");
   reply.header("Access-Control-Allow-Origin", allowAdminMethods ? origin || "*" : "*");

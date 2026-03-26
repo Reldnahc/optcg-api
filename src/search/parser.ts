@@ -98,12 +98,20 @@ interface ParseResult {
   pos: number;
 }
 
+function isOrOperator(token: string | undefined): boolean {
+  return token === "OR";
+}
+
+function isNotOperator(token: string | undefined): boolean {
+  return token === "NOT";
+}
+
 function parseOr(tokens: string[], pos: number): ParseResult {
   const { node: left, pos: nextPos } = parseAnd(tokens, pos);
   const children: SearchNode[] = [left];
 
   let p = nextPos;
-  while (p < tokens.length && tokens[p].toUpperCase() === "OR") {
+  while (p < tokens.length && isOrOperator(tokens[p])) {
     p++; // skip OR
     const { node: right, pos: afterRight } = parseAnd(tokens, p);
     children.push(right);
@@ -118,7 +126,7 @@ function parseAnd(tokens: string[], pos: number): ParseResult {
   const children: SearchNode[] = [];
   let p = pos;
 
-  while (p < tokens.length && tokens[p] !== ")" && tokens[p].toUpperCase() !== "OR") {
+  while (p < tokens.length && tokens[p] !== ")" && !isOrOperator(tokens[p])) {
     const { node, pos: nextPos } = parseAtom(tokens, p);
     children.push(node);
     p = nextPos;
@@ -131,6 +139,9 @@ function parseAnd(tokens: string[], pos: number): ParseResult {
 
 function parseAtom(tokens: string[], pos: number): ParseResult {
   const token = tokens[pos];
+  if (token === undefined) {
+    throw new Error("Unexpected end of search query");
+  }
 
   // Parenthesized group
   if (token === "(") {
@@ -142,7 +153,7 @@ function parseAtom(tokens: string[], pos: number): ParseResult {
   }
 
   // Negation
-  if (token === "-" || token.toUpperCase() === "NOT") {
+  if (token === "-" || isNotOperator(token)) {
     const { node, pos: afterNeg } = parseAtom(tokens, pos + 1);
     negate(node);
     return { node, pos: afterNeg };

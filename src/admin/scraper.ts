@@ -172,8 +172,9 @@ export async function adminScraperRoutes(app: FastifyInstance) {
   });
 
   app.post("/scraper/run", async (req, reply) => {
-    const body = (req.body ?? {}) as { language?: unknown };
+    const body = (req.body ?? {}) as { language?: unknown; set_code?: unknown };
     const language = typeof body.language === "string" ? body.language.trim() : "";
+    const setCode = typeof body.set_code === "string" ? body.set_code.trim().toUpperCase() : "";
 
     try {
       if (await hasRunningTask("SCRAPER")) {
@@ -182,11 +183,19 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       }
 
       const result = await runConfiguredTask("SCRAPER", {
-        ...(language ? { command: ["scrape", "--lang", language] } : {}),
+        ...(language || setCode
+          ? {
+              command: [
+                "scrape",
+                ...(language ? ["--lang", language] : []),
+                ...(setCode ? [setCode] : []),
+              ],
+            }
+          : {}),
       });
       return { data: result };
     } catch (error: any) {
-      req.log.error({ err: error, language }, "Failed to start scraper task");
+      req.log.error({ err: error, language, setCode }, "Failed to start scraper task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }

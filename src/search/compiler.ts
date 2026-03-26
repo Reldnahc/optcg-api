@@ -52,7 +52,7 @@ function param(ctx: Ctx, value: unknown): string {
 function compileNode(node: SearchNode, ctx: Ctx): string {
   switch (node.type) {
     case "name":
-      return compileName(node.value, node.negated, ctx);
+      return compileFreeText(node.value, node.negated, ctx);
     case "filter":
       return compileFilter(node.field, node.operator, node.value, node.negated, ctx);
     case "and":
@@ -62,9 +62,21 @@ function compileNode(node: SearchNode, ctx: Ctx): string {
   }
 }
 
-function compileName(value: string, negated: boolean, ctx: Ctx): string {
+function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
   const p = param(ctx, `%${value}%`);
-  return negated ? `c.name NOT ILIKE ${p}` : `c.name ILIKE ${p}`;
+  const sql = `(
+    c.name ILIKE ${p}
+    OR c.card_number ILIKE ${p}
+    OR c.card_type ILIKE ${p}
+    OR c.effect ILIKE ${p}
+    OR c.trigger ILIKE ${p}
+    OR c.artist ILIKE ${p}
+    OR c.true_set_code ILIKE ${p}
+    OR p.name ILIKE ${p}
+    OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE t ILIKE ${p})
+    OR EXISTS (SELECT 1 FROM unnest(COALESCE(c.attribute, ARRAY[]::text[])) AS a WHERE a ILIKE ${p})
+  )`;
+  return negated ? `NOT ${sql}` : sql;
 }
 
 function numericOp(col: string, op: Operator, value: string, negated: boolean, ctx: Ctx): string {
@@ -156,6 +168,13 @@ function compileFilter(
       const p = param(ctx, `%${value}%`);
       const sql = `c.artist ILIKE ${p}`;
       return negated ? `NOT (${sql})` : sql;
+    }
+
+    case "text": {
+      if (!["=", ":"].includes(op)) {
+        throw new Error(`Unsupported text operator: ${op}`);
+      }
+      return compileFreeText(value, negated, ctx);
     }
 
     case "effect": {

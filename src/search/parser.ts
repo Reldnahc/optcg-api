@@ -55,6 +55,8 @@ const FIELD_ALIASES: Record<string, string> = {
   r: "rarity",
   rarity: "rarity",
   artist: "artist",
+  text: "text",
+  any: "text",
   o: "effect",
   effect: "effect",
   trigger: "trigger",

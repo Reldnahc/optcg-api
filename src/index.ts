@@ -18,8 +18,8 @@ import { adminAuth } from "./middleware/adminAuth.js";
 const app = Fastify({ logger: true });
 const adminOrigin = getAdminOrigin();
 const SLOW_REQUEST_MS = 1000;
-const RATE_LIMIT_WINDOW_MS = 15_000;
-const RATE_LIMIT_MAX_REQUESTS = 20;
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || "10000", 10);
+const RATE_LIMIT_MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "120", 10);
 
 // Rate limiting — 60 req/min per IP
 const ipHits = new Map<string, { count: number; resetAt: number }>();

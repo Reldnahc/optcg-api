@@ -44,6 +44,14 @@ function tcgplayerProductOrderSql(alias: string): string {
   ${alias}.tcgplayer_product_id`;
 }
 
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function squeezeRepeatedChars(value: string): string {
+  return value.replace(/([a-z0-9])\1+/g, "$1");
+}
+
 export async function cardsRoutes(app: FastifyInstance) {
   // GET /v1/cards — search/list
   app.get("/cards", async (req, reply) => {
@@ -249,11 +257,49 @@ export async function cardsRoutes(app: FastifyInstance) {
       return { error: { status: 400, message: "Query must be at least 2 characters" } };
     }
 
+    const normalizedQ = normalizeSearchText(q);
+    const normalizedNameSql = `regexp_replace(lower(name), '[^a-z0-9]+', '', 'g')`;
+    const squeezedNormalizedNameSql = `regexp_replace(${normalizedNameSql}, '([a-z0-9])\\1+', '\\1', 'g')`;
+    const rawLike = `%${q}%`;
+    const normalizedLike = `%${normalizedQ}%`;
+    const squeezedLike = `%${squeezeRepeatedChars(normalizedQ)}%`;
+
+    const autocompleteWhere = [
+      "language = 'en'",
+      "AND",
+      "(",
+      `name ILIKE $1`,
+      `OR ${normalizedNameSql} LIKE $2`,
+      `OR ${squeezedNormalizedNameSql} LIKE $3`,
+      ")",
+    ].join(" ");
+
+    const autocompleteRankSql = [
+      "CASE",
+      "WHEN lower(name) = lower($4) THEN 0",
+      `WHEN ${normalizedNameSql} = $5 THEN 1`,
+      "WHEN name ILIKE $6 THEN 2",
+      `WHEN ${normalizedNameSql} LIKE $2 THEN 3`,
+      `WHEN ${squeezedNormalizedNameSql} LIKE $3 THEN 4`,
+      "ELSE 5",
+      "END",
+    ].join(" ");
+
+    const params: unknown[] = [rawLike, normalizedLike, squeezedLike, q, normalizedQ, `${q}%`];
+
     const rows = await query<{ name: string }>(
-      `SELECT DISTINCT name FROM cards
-       WHERE language = 'en' AND name ILIKE $1
-       ORDER BY name LIMIT 10`,
-      [`%${q}%`],
+      `SELECT name
+       FROM (
+         SELECT name,
+                MIN(${autocompleteRankSql}) AS sort_rank,
+                MIN(LENGTH(name)) AS name_length
+         FROM cards
+         WHERE ${autocompleteWhere}
+         GROUP BY name
+       ) ranked_names
+       ORDER BY sort_rank, name_length, name
+       LIMIT 10`,
+      params,
     );
 
     reply.header("Cache-Control", "public, max-age=3600");

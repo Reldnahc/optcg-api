@@ -53,9 +53,12 @@ function normalizedTextSql(expr: string): string {
   return `regexp_replace(lower(COALESCE(${expr}, '')), '[^a-z0-9]+', '', 'g')`;
 }
 
-function subsequenceLikePattern(value: string): string | null {
-  if (value.length < 5) return null;
-  return `%${value.split("").join("%")}%`;
+function squeezedNormalizedTextSql(expr: string): string {
+  return `regexp_replace(${normalizedTextSql(expr)}, '([a-z0-9])\\1+', '\\1', 'g')`;
+}
+
+function squeezeRepeatedChars(value: string): string {
+  return value.replace(/([a-z0-9])\1+/g, "$1");
 }
 
 function compileNode(node: SearchNode, ctx: Ctx): string {
@@ -74,16 +77,14 @@ function compileNode(node: SearchNode, ctx: Ctx): string {
 function compileNameSearch(value: string, negated: boolean, ctx: Ctx): string {
   const baseSql = compileFreeText(value, false, ctx);
   const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-  const subsequencePattern = subsequenceLikePattern(normalizedValue);
-
-  if (!subsequencePattern) {
+  if (!normalizedValue) {
     return negated ? `NOT ${baseSql}` : baseSql;
   }
 
-  const subsequence = param(ctx, subsequencePattern);
+  const squeezed = param(ctx, `%${squeezeRepeatedChars(normalizedValue)}%`);
   const fuzzySql = `(
-    ${normalizedTextSql("c.name")} LIKE ${subsequence}
-    OR ${normalizedTextSql("p.name")} LIKE ${subsequence}
+    ${squeezedNormalizedTextSql("c.name")} LIKE ${squeezed}
+    OR ${squeezedNormalizedTextSql("p.name")} LIKE ${squeezed}
   )`;
 
   const sql = `(

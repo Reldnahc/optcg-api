@@ -18,7 +18,7 @@ function extractInlineSort(node: SearchNode): { order?: string; direction?: stri
   }
   return result;
 }
-import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, bestArtistSubquery, bestImageSubquery, setName, thumbnailUrl } from "../format.js";
+import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, bestImageSubquery, setName, thumbnailUrl } from "../format.js";
 
 const VALID_SORTS: Record<string, string> = {
   name: "c.name",
@@ -294,8 +294,7 @@ export async function cardsRoutes(app: FastifyInstance) {
       ),
       query<CardRow & { image_url: string | null }>(
         `SELECT c.*, p.name AS product_name, p.released_at,
-                ${bestImageSubquery("c.id")} AS image_url,
-                ${bestArtistSubquery("c.id")} AS artist
+                ${bestImageSubquery("c.id")} AS image_url
          FROM cards c
          JOIN products p ON p.id = c.product_id
          ${needsPriceJoin ? priceJoin : ""}
@@ -380,7 +379,6 @@ export async function cardsRoutes(app: FastifyInstance) {
 
     const cardResult = await query<CardRow & { set_product_name: string | null }>(
       `SELECT c.*, p.name AS product_name, p.released_at,
-              ${bestArtistSubquery("c.id")} AS artist,
               (SELECT p2.name FROM products p2
                WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
                LIMIT 1) AS set_product_name

@@ -1,6 +1,13 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { bestArtistSubquery, bestImageSubquery, formatCard, CardRow } from "../format.js";
+import {
+  bestImageSubquery,
+  formatCard,
+  CardRow,
+  labelOrder,
+  setName,
+  thumbnailUrl,
+} from "../format.js";
 import { normalizeCardRarity } from "../rarity.js";
 
 const CARD_TYPES = new Set(["Leader", "Character", "Event", "Stage"]);
@@ -48,8 +55,7 @@ function asOptionalStringArray(
 async function getCardRecord(cardNumber: string, language: string) {
   const result = await query<CardRow & { image_url: string | null }>(
     `SELECT c.*, p.name AS product_name, p.released_at,
-            ${bestImageSubquery("c.id")} AS image_url,
-            ${bestArtistSubquery("c.id")} AS artist
+            ${bestImageSubquery("c.id")} AS image_url
      FROM cards c
      JOIN products p ON p.id = c.product_id
      WHERE c.card_number ILIKE $1 AND c.language = $2
@@ -126,7 +132,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       query<CardRow & { image_url: string | null; image_count: string }>(
         `SELECT c.*, p.name AS product_name, p.released_at,
                 ${bestImageSubquery("c.id")} AS image_url,
-                ${bestArtistSubquery("c.id")} AS artist,
                 (SELECT COUNT(*) FROM card_images ci WHERE ci.card_id = c.id) AS image_count
          FROM cards c
          JOIN products p ON p.id = c.product_id
@@ -145,6 +150,250 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         image_count: parseInt(row.image_count, 10),
       })),
       pagination: { page, limit, total, has_more: offset + limit < total },
+    };
+  });
+
+  app.get("/cards/:card_number", async (req, reply) => {
+    const { card_number } = req.params as { card_number: string };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+
+    const cardResult = await query<CardRow & { set_product_name: string | null }>(
+      `SELECT c.*, p.name AS product_name, p.released_at,
+              (SELECT p2.name FROM products p2
+               WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
+               LIMIT 1) AS set_product_name
+       FROM cards c
+       JOIN products p ON p.id = c.product_id
+       WHERE c.card_number ILIKE $1 AND c.language = $2
+       LIMIT 1`,
+      [card_number, language],
+    );
+
+    if (cardResult.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    const card = cardResult.rows[0];
+
+    const [images, legality, cardBans, languages] = await Promise.all([
+      query<{
+        variant_index: number;
+        image_url: string | null;
+        scan_url: string | null;
+        artist: string | null;
+        label: string | null;
+        classified: boolean;
+        is_default: boolean;
+        product_name: string | null;
+        product_released_at: string | null;
+        canonical_tcgplayer_url: string | null;
+        tcgplayer_url: string | null;
+        market_price: string | null;
+        low_price: string | null;
+        mid_price: string | null;
+        high_price: string | null;
+        sub_type: string | null;
+      }>(
+        `SELECT ci.variant_index, ci.image_url, ci.scan_url,
+                ci.artist,
+                ci.label, ci.classified, ci.is_default,
+                ip.name AS product_name, ip.released_at AS product_released_at,
+                canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,
+                tp.tcgplayer_url, tp.sub_type,
+                pr.market_price, pr.low_price, pr.mid_price, pr.high_price
+         FROM card_images ci
+         JOIN cards c ON c.id = ci.card_id
+         LEFT JOIN products ip ON ip.id = ci.product_id
+         LEFT JOIN LATERAL (
+           SELECT tp2.tcgplayer_url
+           FROM tcgplayer_products tp2
+           WHERE tp2.card_image_id = ci.id
+           ORDER BY CASE
+             WHEN NULLIF(tp2.tcgplayer_url, '') IS NULL THEN 1
+             ELSE 0
+           END,
+           CASE
+             WHEN NULLIF(tp2.sub_type, '') IS NULL OR tp2.sub_type = 'Normal' THEN 0
+             ELSE 1
+           END,
+           COALESCE(NULLIF(tp2.sub_type, ''), ''),
+           tp2.tcgplayer_product_id
+           LIMIT 1
+         ) canonical_tp ON true
+         LEFT JOIN tcgplayer_products tp ON tp.card_image_id = ci.id
+         LEFT JOIN LATERAL (
+           SELECT market_price, low_price, mid_price, high_price
+           FROM tcgplayer_prices
+           WHERE tcgplayer_product_id = tp.tcgplayer_product_id
+             AND sub_type IS NOT DISTINCT FROM tp.sub_type
+           ORDER BY fetched_at DESC LIMIT 1
+         ) pr ON true
+         WHERE ci.card_id = $1
+         ORDER BY ci.variant_index,
+           CASE
+             WHEN NULLIF(tp.tcgplayer_url, '') IS NULL THEN 1
+             ELSE 0
+           END,
+           CASE
+             WHEN NULLIF(tp.sub_type, '') IS NULL OR tp.sub_type = 'Normal' THEN 0
+             ELSE 1
+           END,
+           COALESCE(NULLIF(tp.sub_type, ''), ''),
+           tp.tcgplayer_product_id`,
+        [card.id],
+      ),
+      query<{
+        format_name: string;
+        legal: boolean;
+      }>(
+        `SELECT f.name AS format_name,
+                BOOL_AND(flb.legal) AS legal
+         FROM formats f
+         LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = $1
+         GROUP BY f.id, f.name`,
+        [card.block],
+      ),
+      query<{
+        format_name: string;
+        ban_type: string;
+        max_copies: number | null;
+        banned_at: string;
+        reason: string | null;
+        paired_card_number: string | null;
+      }>(
+        `SELECT f.name AS format_name, fb.ban_type, fb.max_copies, fb.banned_at, fb.reason, fb.paired_card_number
+         FROM format_bans fb
+         JOIN formats f ON f.id = fb.format_id
+         WHERE fb.card_number = $1 AND fb.unbanned_at IS NULL`,
+        [card.card_number],
+      ),
+      query<{ language: string }>(
+        `SELECT DISTINCT language FROM cards WHERE card_number ILIKE $1 ORDER BY language`,
+        [card_number],
+      ),
+    ]);
+
+    const now = new Date();
+    const isReleased = card.released_at ? new Date(card.released_at) <= now : false;
+
+    const imageMap = new Map<number, {
+      variant_index: number;
+      image_url: string | null;
+      scan_url: string | null;
+      artist: string | null;
+      label: string | null;
+      is_default: boolean;
+      product_name: string | null;
+      product_released_at: string | null;
+      tcgplayer_url: string | null;
+      prices: Record<string, {
+        market_price: string | null;
+        low_price: string | null;
+        mid_price: string | null;
+        high_price: string | null;
+        tcgplayer_url: string | null;
+      }>;
+    }>();
+
+    for (const img of images.rows) {
+      let entry = imageMap.get(img.variant_index);
+      if (!entry) {
+        entry = {
+          variant_index: img.variant_index,
+          image_url: img.image_url,
+          scan_url: img.scan_url,
+          artist: img.artist,
+          label: img.label,
+          is_default: img.is_default,
+          product_name: img.product_name,
+          product_released_at: img.product_released_at,
+          tcgplayer_url: img.canonical_tcgplayer_url,
+          prices: {},
+        };
+        imageMap.set(img.variant_index, entry);
+      }
+      if (!entry.tcgplayer_url && img.canonical_tcgplayer_url) {
+        entry.tcgplayer_url = img.canonical_tcgplayer_url;
+      }
+      if (img.market_price !== null) {
+        const key = img.sub_type || "Normal";
+        entry.prices[key] = {
+          market_price: img.market_price,
+          low_price: img.low_price,
+          mid_price: img.mid_price,
+          high_price: img.high_price,
+          tcgplayer_url: img.tcgplayer_url,
+        };
+      }
+    }
+
+    const bansByFormat = new Map<string, typeof cardBans.rows>();
+    for (const ban of cardBans.rows) {
+      const arr = bansByFormat.get(ban.format_name) ?? [];
+      arr.push(ban);
+      bansByFormat.set(ban.format_name, arr);
+    }
+
+    const legalityObj: Record<string, {
+      status: string;
+      banned_at?: string;
+      reason?: string;
+      max_copies?: number;
+      paired_with?: string[];
+    }> = {};
+    for (const row of legality.rows) {
+      const bans = bansByFormat.get(row.format_name) ?? [];
+
+      if (!isReleased) {
+        const releaseDate = card.released_at ? new Date(card.released_at) : null;
+        const status = releaseDate
+          ? `Releases ${releaseDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
+          : "unreleased";
+        legalityObj[row.format_name] = { status };
+      } else if (bans.length > 0) {
+        const ban = bans[0];
+        const entry: typeof legalityObj[string] = { status: ban.ban_type };
+        if (ban.banned_at) entry.banned_at = ban.banned_at;
+        if (ban.reason) entry.reason = ban.reason;
+        if (ban.ban_type === "restricted" && ban.max_copies != null) {
+          entry.max_copies = ban.max_copies;
+        }
+        if (ban.ban_type === "pair") {
+          entry.paired_with = bans
+            .filter((b) => b.paired_card_number)
+            .map((b) => b.paired_card_number!);
+        }
+        legalityObj[row.format_name] = entry;
+      } else if (row.legal) {
+        legalityObj[row.format_name] = { status: "legal" };
+      } else {
+        legalityObj[row.format_name] = { status: "not_legal" };
+      }
+    }
+
+    return {
+      data: {
+        ...formatCard(card),
+        set_name: card.set_product_name ?? setName(card.true_set_code),
+        images: [...imageMap.values()]
+          .sort((a, b) => {
+            const labelDiff = labelOrder(a.label) - labelOrder(b.label);
+            if (labelDiff !== 0) return labelDiff;
+            const dateA = a.product_released_at ?? "";
+            const dateB = b.product_released_at ?? "";
+            if (dateA !== dateB) return dateA < dateB ? -1 : 1;
+            return a.variant_index - b.variant_index;
+          })
+          .map(({ is_default: _, product_released_at: __, scan_url, ...rest }) => ({
+            ...rest,
+            thumbnail_url: thumbnailUrl(rest.image_url),
+            ...(scan_url ? { scan_url } : {}),
+          })),
+        legality: legalityObj,
+        available_languages: languages.rows.map((r) => r.language),
+      },
     };
   });
 
@@ -247,8 +496,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
          RETURNING *
        )
        SELECT updated.*, p.name AS product_name, p.released_at,
-              ${bestImageSubquery("updated.id")} AS image_url,
-              ${bestArtistSubquery("updated.id")} AS artist
+              ${bestImageSubquery("updated.id")} AS image_url
        FROM updated
        JOIN products p ON p.id = updated.product_id`,
       params,

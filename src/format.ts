@@ -104,7 +104,6 @@ export interface CardRow {
   effect: string | null;
   trigger: string | null;
   block: string | null;
-  artist: string | null;
   product_name: string;
   released_at: string | null;
 }
@@ -135,7 +134,6 @@ export function formatCard(row: CardRow & { image_url?: string | null }) {
     effect: row.effect,
     trigger: row.trigger,
     block: row.block,
-    artist: row.artist,
     ...(row.image_url !== undefined
       ? {
           image_url: row.image_url,

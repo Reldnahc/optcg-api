@@ -219,9 +219,10 @@ export async function cardsRoutes(app: FastifyInstance) {
         ELSE 0
       END`;
     }
+    const fallbackSortSql = sortCol ?? VALID_SORTS.card_number;
     const primaryOrderSql = useSearchRank && searchRankSql
       ? `${searchRankSql} DESC`
-      : `${sortCol} ${order} NULLS LAST`;
+      : `${fallbackSortSql} ${order} NULLS LAST`;
 
     const priceJoin = `LEFT JOIN LATERAL (
          SELECT tp.tcgplayer_product_id, pr.market_price

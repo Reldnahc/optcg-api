@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { bestImageSubquery, setName } from "../format.js";
+import { bestImageSubquery, setName, thumbnailUrl } from "../format.js";
 
 export async function setsRoutes(app: FastifyInstance) {
   // GET /v1/sets — all sets
@@ -97,7 +97,10 @@ export async function setsRoutes(app: FastifyInstance) {
           set_codes: p.set_codes,
           released_at: p.released_at,
         })),
-        cards: cards.rows,
+        cards: cards.rows.map((card) => ({
+          ...card,
+          thumbnail_url: thumbnailUrl(card.image_url),
+        })),
       },
     };
   });

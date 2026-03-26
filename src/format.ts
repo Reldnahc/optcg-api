@@ -29,6 +29,26 @@ export function bestImageSubquery(cardIdExpr: string): string {
     ORDER BY ${LABEL_ORDER_SQL} LIMIT 1)`;
 }
 
+export function thumbnailUrl(imageUrl: string | null): string | null {
+  if (!imageUrl) return null;
+
+  try {
+    const url = new URL(imageUrl);
+    const slashIndex = url.pathname.lastIndexOf("/");
+    if (slashIndex === -1) return null;
+
+    const dir = url.pathname.slice(0, slashIndex);
+    const filename = url.pathname.slice(slashIndex + 1);
+    const dotIndex = filename.lastIndexOf(".");
+    const basename = dotIndex === -1 ? filename : filename.slice(0, dotIndex);
+
+    url.pathname = `${dir}/thumbs/${basename}.webp`;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Derive a human-readable name from a set code like OP01, ST05, EB04, PRB01 */
 export function setName(code: string): string {
   const prefixes: Record<string, string> = {
@@ -98,6 +118,11 @@ export function formatCard(row: CardRow & { image_url?: string | null }) {
     trigger: row.trigger,
     block: row.block,
     artist: row.artist,
-    ...(row.image_url !== undefined ? { image_url: row.image_url } : {}),
+    ...(row.image_url !== undefined
+      ? {
+          image_url: row.image_url,
+          thumbnail_url: thumbnailUrl(row.image_url),
+        }
+      : {}),
   };
 }

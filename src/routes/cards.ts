@@ -17,7 +17,7 @@ function extractInlineSort(node: SearchNode): { order?: string; direction?: stri
   }
   return result;
 }
-import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, setName } from "../format.js";
+import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, setName, thumbnailUrl } from "../format.js";
 
 const VALID_SORTS: Record<string, string> = {
   name: "c.name",
@@ -483,6 +483,7 @@ export async function cardsRoutes(app: FastifyInstance) {
           return a.variant_index - b.variant_index;
         }).map(({ is_default: _, product_released_at: __, scan_url, ...rest }) => ({
           ...rest,
+          thumbnail_url: thumbnailUrl(rest.image_url),
           ...(scan_url ? { scan_url } : {}),
         })),
         legality: legalityObj,

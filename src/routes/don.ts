@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
+import { thumbnailUrl } from "../format.js";
 
 export async function donRoutes(app: FastifyInstance) {
   // GET /v1/don
@@ -47,7 +48,12 @@ export async function donRoutes(app: FastifyInstance) {
     );
 
     reply.header("Cache-Control", "public, max-age=86400");
-    return { data: rows.rows };
+    return {
+      data: rows.rows.map((row) => ({
+        ...row,
+        thumbnail_url: thumbnailUrl(row.image_url),
+      })),
+    };
   });
 
   // GET /v1/don/:id
@@ -74,6 +80,11 @@ export async function donRoutes(app: FastifyInstance) {
     }
 
     reply.header("Cache-Control", "public, max-age=86400");
-    return { data: row.rows[0] };
+    return {
+      data: {
+        ...row.rows[0],
+        thumbnail_url: thumbnailUrl(row.rows[0].image_url),
+      },
+    };
   });
 }

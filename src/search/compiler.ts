@@ -49,10 +49,19 @@ function param(ctx: Ctx, value: unknown): string {
   return `$${ctx.idx++}`;
 }
 
+function normalizedTextSql(expr: string): string {
+  return `regexp_replace(lower(COALESCE(${expr}, '')), '[^a-z0-9]+', '', 'g')`;
+}
+
+function subsequenceLikePattern(value: string): string | null {
+  if (value.length < 5) return null;
+  return `%${value.split("").join("%")}%`;
+}
+
 function compileNode(node: SearchNode, ctx: Ctx): string {
   switch (node.type) {
     case "name":
-      return compileFreeText(node.value, node.negated, ctx);
+      return compileNameSearch(node.value, node.negated, ctx);
     case "filter":
       return compileFilter(node.field, node.operator, node.value, node.negated, ctx);
     case "and":
@@ -62,20 +71,67 @@ function compileNode(node: SearchNode, ctx: Ctx): string {
   }
 }
 
-function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
-  const p = param(ctx, `%${value}%`);
-  const sql = `(
-    c.name ILIKE ${p}
-    OR c.card_number ILIKE ${p}
-    OR c.card_type ILIKE ${p}
-    OR c.effect ILIKE ${p}
-    OR c.trigger ILIKE ${p}
-    OR c.artist ILIKE ${p}
-    OR c.true_set_code ILIKE ${p}
-    OR p.name ILIKE ${p}
-    OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE t ILIKE ${p})
-    OR EXISTS (SELECT 1 FROM unnest(COALESCE(c.attribute, ARRAY[]::text[])) AS a WHERE a ILIKE ${p})
+function compileNameSearch(value: string, negated: boolean, ctx: Ctx): string {
+  const baseSql = compileFreeText(value, false, ctx);
+  const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const subsequencePattern = subsequenceLikePattern(normalizedValue);
+
+  if (!subsequencePattern) {
+    return negated ? `NOT ${baseSql}` : baseSql;
+  }
+
+  const subsequence = param(ctx, subsequencePattern);
+  const fuzzySql = `(
+    ${normalizedTextSql("c.name")} LIKE ${subsequence}
+    OR ${normalizedTextSql("p.name")} LIKE ${subsequence}
   )`;
+
+  const sql = `(
+    ${baseSql}
+    OR ${fuzzySql}
+  )`;
+  return negated ? `NOT ${sql}` : sql;
+}
+
+function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
+  const raw = param(ctx, `%${value}%`);
+  const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normalized = normalizedValue ? param(ctx, `%${normalizedValue}%`) : null;
+
+  const rawSql = `(
+    c.name ILIKE ${raw}
+    OR c.card_number ILIKE ${raw}
+    OR c.card_type ILIKE ${raw}
+    OR c.effect ILIKE ${raw}
+    OR c.trigger ILIKE ${raw}
+    OR c.artist ILIKE ${raw}
+    OR c.true_set_code ILIKE ${raw}
+    OR p.name ILIKE ${raw}
+    OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE t ILIKE ${raw})
+    OR EXISTS (SELECT 1 FROM unnest(COALESCE(c.attribute, ARRAY[]::text[])) AS a WHERE a ILIKE ${raw})
+  )`;
+
+  const normalizedSql = normalized
+    ? `(
+    ${normalizedTextSql("c.name")} LIKE ${normalized}
+    OR ${normalizedTextSql("c.card_number")} LIKE ${normalized}
+    OR ${normalizedTextSql("c.card_type")} LIKE ${normalized}
+    OR ${normalizedTextSql("c.effect")} LIKE ${normalized}
+    OR ${normalizedTextSql("c.trigger")} LIKE ${normalized}
+    OR ${normalizedTextSql("c.artist")} LIKE ${normalized}
+    OR ${normalizedTextSql("c.true_set_code")} LIKE ${normalized}
+    OR ${normalizedTextSql("p.name")} LIKE ${normalized}
+    OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE ${normalizedTextSql("t")} LIKE ${normalized})
+    OR EXISTS (SELECT 1 FROM unnest(COALESCE(c.attribute, ARRAY[]::text[])) AS a WHERE ${normalizedTextSql("a")} LIKE ${normalized})
+  )`
+    : null;
+
+  const sql = normalizedSql
+    ? `(
+    ${rawSql}
+    OR ${normalizedSql}
+  )`
+    : rawSql;
   return negated ? `NOT ${sql}` : sql;
 }
 

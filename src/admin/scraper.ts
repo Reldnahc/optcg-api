@@ -297,6 +297,45 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post("/wipe/run", async (req, reply) => {
+    const body = (req.body ?? {}) as {
+      language?: unknown;
+      s3?: unknown;
+      confirm?: unknown;
+    };
+
+    const language = typeof body.language === "string" ? body.language.trim().toLowerCase() : "";
+    const wipeS3 = body.s3 === true;
+    const confirm = typeof body.confirm === "string" ? body.confirm.trim() : "";
+
+    if (confirm !== "WIPE") {
+      reply.code(400);
+      return { error: { status: 400, message: 'confirm must equal "WIPE"' } };
+    }
+
+    if (language && !["en", "ja", "fr", "zh"].includes(language)) {
+      reply.code(400);
+      return { error: { status: 400, message: "language must be en, ja, fr, or zh" } };
+    }
+
+    const command = ["wipe"];
+    if (language) {
+      command.push("--lang", language);
+    }
+    if (wipeS3) {
+      command.push("--s3");
+    }
+
+    try {
+      const result = await runConfiguredTask("WIPE", { command });
+      return { data: result };
+    } catch (error: any) {
+      req.log.error({ err: error, language, wipeS3, command }, "Failed to start wipe task");
+      reply.code(501);
+      return { error: { status: 501, message: error.message } };
+    }
+  });
+
   app.post("/variant-merge/run", async (req, reply) => {
     const body = (req.body ?? {}) as {
       card_number?: unknown;

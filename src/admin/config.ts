@@ -48,6 +48,7 @@ export type EcsTaskPrefix =
   | "FORMATS"
   | "OCR"
   | "THUMBS"
+  | "WIPE"
   | "VARIANT_MERGE";
 
 export function getEcsTaskConfig(prefix: EcsTaskPrefix): EcsTaskConfig | null {

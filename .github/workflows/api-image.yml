@@ -16,6 +16,8 @@ permissions:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: poneglyph-one-optcg-api
+  ECS_CLUSTER: poneglyph-one-cluster
+  ECS_SERVICE: poneglyph-one-api
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -53,3 +55,19 @@ jobs:
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
         run: |
           echo "Pushed $IMAGE_URI:sha-${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy API service
+        if: github.ref_name == 'main' || github.ref_name == 'master'
+        run: |
+          aws ecs update-service \
+            --region "$AWS_REGION" \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment
+
+          aws ecs wait services-stable \
+            --region "$AWS_REGION" \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+          echo "Rolled out $ECS_SERVICE on $ECS_CLUSTER" >> "$GITHUB_STEP_SUMMARY"

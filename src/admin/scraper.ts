@@ -77,8 +77,9 @@ async function runConfiguredTask(
 
 export async function adminScraperRoutes(app: FastifyInstance) {
   app.get("/stats", async () => {
-    const [totalCardsResult, cardsByLanguageResult, recentErrorsResult] = await Promise.all([
+    const [totalCardsResult, totalVariantsResult, cardsByLanguageResult, recentErrorsResult] = await Promise.all([
       query<{ total: string }>(`SELECT COUNT(*) AS total FROM cards`),
+      query<{ total: string }>(`SELECT COUNT(*) AS total FROM card_images`),
       query<{ language: string; count: string }>(
         `SELECT language, COUNT(*) AS count
          FROM cards
@@ -97,6 +98,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     return {
       data: {
         total_cards: parseInt(totalCardsResult.rows[0]?.total ?? "0", 10),
+        total_variants: parseInt(totalVariantsResult.rows[0]?.total ?? "0", 10),
         cards_by_language: cardsByLanguageResult.rows.map((row) => ({
           language: row.language,
           count: parseInt(row.count, 10),
@@ -170,6 +172,121 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     return { data: rows.rows };
   });
 
+  app.get("/ocr/status", async (_req, reply) => {
+    const [statusCounts, sourceCounts] = await Promise.all([
+      query<{ artist_ocr_status: string; count: string }>(
+        `SELECT artist_ocr_status, COUNT(*) AS count
+         FROM card_images
+         GROUP BY artist_ocr_status
+         ORDER BY artist_ocr_status ASC`,
+      ),
+      query<{ artist_source: string | null; count: string }>(
+        `SELECT artist_source, COUNT(*) AS count
+         FROM card_images
+         GROUP BY artist_source
+         ORDER BY artist_source ASC NULLS FIRST`,
+      ),
+    ]);
+
+    reply.header("Cache-Control", "no-store");
+    return {
+      data: {
+        by_status: statusCounts.rows.map((row) => ({
+          status: row.artist_ocr_status,
+          count: parseInt(row.count, 10),
+        })),
+        by_source: sourceCounts.rows.map((row) => ({
+          source: row.artist_source,
+          count: parseInt(row.count, 10),
+        })),
+      },
+    };
+  });
+
+  app.get("/ocr/review", async (req, reply) => {
+    const qs = req.query as Record<string, string>;
+    const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "50", 10)));
+    const status = (qs.status || "needs_review").trim();
+    const lang = (qs.lang || "").trim().toLowerCase();
+    const setCode = (qs.set || "").trim().toUpperCase();
+
+    const allowedStatuses = new Set(["pending", "processing", "succeeded", "failed", "needs_review", "skipped"]);
+    if (!allowedStatuses.has(status)) {
+      reply.code(400);
+      return { error: { status: 400, message: `Invalid OCR status: ${status}` } };
+    }
+
+    const conditions = [`ci.artist_ocr_status = $1`];
+    const params: unknown[] = [status];
+    let idx = 2;
+
+    if (lang) {
+      conditions.push(`c.language = $${idx}`);
+      params.push(lang);
+      idx++;
+    }
+    if (setCode) {
+      conditions.push(`c.true_set_code = $${idx}`);
+      params.push(setCode);
+      idx++;
+    }
+
+    const rows = await query<{
+      image_id: string;
+      card_id: string;
+      card_number: string;
+      language: string;
+      true_set_code: string;
+      name: string;
+      variant_index: number;
+      label: string | null;
+      image_url: string | null;
+      scan_url: string | null;
+      artist: string | null;
+      artist_source: string | null;
+      artist_ocr_status: string;
+      artist_ocr_candidate: string | null;
+      artist_ocr_confidence: string | null;
+      artist_ocr_attempts: number;
+      artist_ocr_last_error: string | null;
+      artist_ocr_last_run_at: string | null;
+      artist_ocr_source_url: string | null;
+    }>(
+      `SELECT
+         ci.id AS image_id,
+         ci.card_id,
+         c.card_number,
+         c.language,
+         c.true_set_code,
+         c.name,
+         ci.variant_index,
+         ci.label,
+         ci.image_url,
+         ci.scan_url,
+         ci.artist,
+         ci.artist_source,
+         ci.artist_ocr_status,
+         ci.artist_ocr_candidate,
+         ci.artist_ocr_confidence,
+         ci.artist_ocr_attempts,
+         ci.artist_ocr_last_error,
+         ci.artist_ocr_last_run_at,
+         ci.artist_ocr_source_url
+       FROM card_images ci
+       JOIN cards c ON c.id = ci.card_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY
+         ci.artist_ocr_last_run_at DESC NULLS LAST,
+         c.card_number ASC,
+         ci.variant_index ASC
+       LIMIT $${idx}`,
+      [...params, limit],
+    );
+
+    reply.header("Cache-Control", "no-store");
+    return { data: rows.rows };
+  });
+
   app.post("/scraper/run", async (req, reply) => {
     const body = (req.body ?? {}) as { language?: unknown; set_code?: unknown; use_http?: unknown };
     const language = typeof body.language === "string" ? body.language.trim() : "";
@@ -208,15 +325,25 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       archive_date?: unknown;
       archive_from?: unknown;
       archive_to?: unknown;
+      dedupe_links?: unknown;
     };
     const wipe = body.wipe === true;
+    const dedupeLinks = body.dedupe_links === true;
     const archiveDate = typeof body.archive_date === "string" ? body.archive_date.trim() : "";
     const archiveFrom = typeof body.archive_from === "string" ? body.archive_from.trim() : "";
     const archiveTo = typeof body.archive_to === "string" ? body.archive_to.trim() : "";
 
-    if (wipe && (archiveDate || archiveFrom || archiveTo)) {
+    if (wipe && (archiveDate || archiveFrom || archiveTo || dedupeLinks)) {
       reply.code(400);
       return { error: { status: 400, message: "wipe cannot be combined with archive sync" } };
+    }
+    if (dedupeLinks && (archiveDate || archiveFrom || archiveTo)) {
+      reply.code(400);
+      return { error: { status: 400, message: "dedupe_links cannot be combined with archive sync" } };
+    }
+    if (dedupeLinks && wipe) {
+      reply.code(400);
+      return { error: { status: 400, message: "dedupe_links cannot be combined with wipe" } };
     }
     if (archiveDate && (archiveFrom || archiveTo)) {
       reply.code(400);
@@ -230,6 +357,8 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     const command = ["prices"];
     if (wipe) {
       command.push("--wipe");
+    } else if (dedupeLinks) {
+      command.push("--cleanup-placeholders");
     } else if (archiveDate) {
       command.push("--archive-date", archiveDate);
     } else if (archiveFrom && archiveTo) {
@@ -240,7 +369,10 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       const result = await runConfiguredTask("PRICES", { command });
       return { data: result };
     } catch (error: any) {
-      req.log.error({ err: error, wipe, archiveDate, archiveFrom, archiveTo, command }, "Failed to start prices task");
+      req.log.error(
+        { err: error, wipe, dedupeLinks, archiveDate, archiveFrom, archiveTo, command },
+        "Failed to start prices task",
+      );
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
@@ -286,6 +418,121 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
+  });
+
+  app.post("/ocr/:image_id/accept", async (req, reply) => {
+    const { image_id } = req.params as { image_id: string };
+
+    const updated = await query<{
+      id: string;
+      artist: string | null;
+      artist_source: string | null;
+      artist_ocr_status: string;
+      artist_ocr_candidate: string | null;
+      artist_ocr_confidence: string | null;
+    }>(
+      `UPDATE card_images
+       SET artist = COALESCE(artist, artist_ocr_candidate),
+           artist_source = CASE
+             WHEN artist_ocr_candidate IS NOT NULL AND artist IS NULL THEN 'ocr'
+             ELSE artist_source
+           END,
+           artist_ocr_status = CASE
+             WHEN artist_ocr_candidate IS NOT NULL THEN 'succeeded'
+             ELSE artist_ocr_status
+           END,
+           artist_ocr_last_error = NULL
+       WHERE id = $1
+       RETURNING id, artist, artist_source, artist_ocr_status, artist_ocr_candidate, artist_ocr_confidence`,
+      [image_id],
+    );
+
+    if (updated.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "OCR image variant not found" } };
+    }
+
+    if (!updated.rows[0].artist_ocr_candidate && !updated.rows[0].artist) {
+      reply.code(400);
+      return { error: { status: 400, message: "No OCR candidate is available to accept" } };
+    }
+
+    return { data: updated.rows[0] };
+  });
+
+  app.post("/ocr/:image_id/reject", async (req, reply) => {
+    const { image_id } = req.params as { image_id: string };
+
+    const updated = await query<{
+      id: string;
+      artist_ocr_status: string;
+    }>(
+      `UPDATE card_images
+       SET artist_ocr_status = 'failed',
+           artist_ocr_candidate = NULL,
+           artist_ocr_confidence = NULL,
+           artist_ocr_last_error = 'Rejected by admin'
+       WHERE id = $1
+       RETURNING id, artist_ocr_status`,
+      [image_id],
+    );
+
+    if (updated.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "OCR image variant not found" } };
+    }
+
+    return { data: updated.rows[0] };
+  });
+
+  app.post("/ocr/:image_id/reset", async (req, reply) => {
+    const { image_id } = req.params as { image_id: string };
+
+    const updated = await query<{
+      id: string;
+      artist_ocr_status: string;
+    }>(
+      `UPDATE card_images
+       SET artist_ocr_status = 'pending',
+           artist_ocr_candidate = NULL,
+           artist_ocr_confidence = NULL,
+           artist_ocr_last_error = NULL
+       WHERE id = $1
+       RETURNING id, artist_ocr_status`,
+      [image_id],
+    );
+
+    if (updated.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "OCR image variant not found" } };
+    }
+
+    return { data: updated.rows[0] };
+  });
+
+  app.post("/ocr/:image_id/rerun", async (req, reply) => {
+    const { image_id } = req.params as { image_id: string };
+
+    const updated = await query<{
+      id: string;
+      artist_ocr_status: string;
+    }>(
+      `UPDATE card_images
+       SET artist_ocr_status = 'pending',
+           artist_ocr_candidate = NULL,
+           artist_ocr_confidence = NULL,
+           artist_ocr_last_error = NULL
+       WHERE id = $1
+       RETURNING id, artist_ocr_status`,
+      [image_id],
+    );
+
+    if (updated.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "OCR image variant not found" } };
+    }
+
+    return { data: updated.rows[0] };
   });
 
   app.post("/thumbs/run", async (_req, reply) => {

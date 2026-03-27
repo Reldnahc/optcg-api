@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Fastify from "fastify";
 import { closePool } from "optcg-db/db/client.js";
 import { cardsRoutes } from "../dist/routes/cards.js";
+import { compileSearch } from "../dist/search/compiler.js";
 import { parseSearch } from "../dist/search/parser.js";
 
 let app = null;
@@ -70,6 +71,19 @@ const tests = [
     },
   },
   {
+    name: "parser handles exact card name filters",
+    fn: () => {
+      const ast = parseSearch('name="Monkey D. Luffy"');
+      assert.deepEqual(ast, {
+        type: "filter",
+        field: "name",
+        operator: "=",
+        value: "Monkey D. Luffy",
+        negated: false,
+      });
+    },
+  },
+  {
     name: "route matches card names containing literal Not",
     fn: async () => {
       const testApp = await withApp();
@@ -86,6 +100,15 @@ const tests = [
       assert.equal(response.statusCode, 200);
       const body = response.json();
       assert.equal(body.data[0].card_number, "OP10-078");
+    },
+  },
+  {
+    name: "compiler supports exact card name search",
+    fn: () => {
+      const compiled = compileSearch(parseSearch('name="Monkey D. Luffy"'), 1, "cards");
+      assert.match(compiled.sql, /lower\(COALESCE\(c\.name, ''\)\) = lower\(\$1\)/);
+      assert.match(compiled.sql, /regexp_replace\(lower\(COALESCE\(c\.name, ''\)\), '\[\^a-z0-9\]\+', '', 'g'\) = \$2/);
+      assert.deepEqual(compiled.params, ["Monkey D. Luffy", "monkeydluffy"]);
     },
   },
   {

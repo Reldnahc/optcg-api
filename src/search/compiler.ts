@@ -103,6 +103,46 @@ function compileNameSearch(value: string, negated: boolean, ctx: Ctx): string {
   return negated ? `NOT ${sql}` : sql;
 }
 
+function compileCardNameFilter(
+  op: Operator,
+  value: string,
+  negated: boolean,
+  ctx: Ctx,
+): string {
+  switch (op) {
+    case ":": {
+      const raw = param(ctx, `%${value}%`);
+      const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      const normalized = normalizedValue ? param(ctx, `%${normalizedValue}%`) : null;
+      const sql = normalized
+        ? `(
+          c.name ILIKE ${raw}
+          OR ${normalizedTextSql("c.name")} LIKE ${normalized}
+        )`
+        : `c.name ILIKE ${raw}`;
+      return negated ? `NOT (${sql})` : sql;
+    }
+
+    case "=":
+    case "!=": {
+      const raw = param(ctx, value);
+      const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      const normalized = normalizedValue ? param(ctx, normalizedValue) : null;
+      const sql = normalized
+        ? `(
+          lower(COALESCE(c.name, '')) = lower(${raw})
+          OR ${normalizedTextSql("c.name")} = ${normalized}
+        )`
+        : `lower(COALESCE(c.name, '')) = lower(${raw})`;
+      const shouldNegate = negated !== (op === "!=");
+      return shouldNegate ? `NOT (${sql})` : sql;
+    }
+
+    default:
+      throw new Error(`Unsupported name operator: ${op}`);
+  }
+}
+
 function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
   const raw = param(ctx, `%${value}%`);
   const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -186,6 +226,9 @@ function compileFilter(
   ctx: Ctx,
 ): string {
   switch (field) {
+    case "name":
+      return compileCardNameFilter(op, value, negated, ctx);
+
     case "color": {
       const colors = value
         .split(",")

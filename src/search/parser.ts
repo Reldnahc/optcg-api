@@ -4,6 +4,8 @@
  * Supports:
  *   luffy              → name contains "luffy"
  *   "Monkey D. Luffy"  → name contains exact phrase
+ *   name:"Luffy"       → card name contains phrase
+ *   name="Luffy"       → exact card name match
  *   c:red              → color includes red
  *   c=red              → color exactly red
  *   cost>=5            → cost >= 5
@@ -43,6 +45,8 @@ export interface OrNode {
 export type SearchNode = FilterNode | NameNode | AndNode | OrNode;
 
 const FIELD_ALIASES: Record<string, string> = {
+  n: "name",
+  name: "name",
   c: "color",
   color: "color",
   t: "type",

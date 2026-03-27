@@ -57,7 +57,7 @@ function collectPositiveNameTerms(node: SearchNode): string[] {
     case "name":
       return node.negated ? [] : [node.value];
     case "filter":
-      return [];
+      return !node.negated && node.field === "name" ? [node.value] : [];
     case "and":
     case "or":
       return node.children.flatMap(collectPositiveNameTerms);

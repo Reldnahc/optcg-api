@@ -408,6 +408,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         classified: boolean;
         is_default: boolean;
         product_name: string | null;
+        product_set_code: string | null;
         product_released_at: string | null;
         canonical_tcgplayer_url: string | null;
         tcgplayer_url: string | null;
@@ -420,7 +421,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         `SELECT ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified, ci.is_default,
-                ip.name AS product_name, ip.released_at AS product_released_at,
+                ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
                 canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,
                 tp.tcgplayer_url, tp.sub_type,
                 pr.market_price, pr.low_price, pr.mid_price, pr.high_price
@@ -497,6 +498,7 @@ export async function cardsRoutes(app: FastifyInstance) {
       label: string | null;
       is_default: boolean;
       product_name: string | null;
+      product_set_code: string | null;
       product_released_at: string | null;
       tcgplayer_url: string | null;
       prices: Record<string, {
@@ -521,6 +523,7 @@ export async function cardsRoutes(app: FastifyInstance) {
           label: img.label,
           is_default: img.is_default,
           product_name: img.product_name,
+          product_set_code: img.product_set_code,
           product_released_at: img.product_released_at,
           tcgplayer_url: img.canonical_tcgplayer_url,
           prices: {},

@@ -119,7 +119,6 @@ export function formatCard(row: CardRow & { image_url?: string | null }) {
     language: row.language,
     set: row.true_set_code,
     set_name: setName(row.true_set_code),
-    product: row.product_name,
     released_at: row.released_at,
     released,
     card_type: row.card_type,

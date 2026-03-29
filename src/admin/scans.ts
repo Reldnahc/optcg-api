@@ -14,6 +14,24 @@ interface ArtistMatch {
   matched: boolean;
 }
 
+interface PreparedScanItemInput {
+  ordinal: number;
+  raw_card_number: string | null;
+  raw_artist: string | null;
+  card_number: string | null;
+  artist: string | null;
+  artist_present: boolean;
+  artist_confidence: string | null;
+  card_number_confidence: string | null;
+  processed_s3_key: string;
+  processed_url: string;
+  artist_crop_s3_key: string | null;
+  artist_crop_url: string | null;
+  footer_crop_s3_key: string | null;
+  footer_crop_url: string | null;
+  error: string | null;
+}
+
 let s3Client: S3Client | null = null;
 
 function getS3Client(region: string): S3Client {
@@ -129,6 +147,102 @@ async function loadBatchForUpload(batchId: string): Promise<{ id: string; langua
 function deriveFileNameFromKey(key: string): string {
   const base = key.split("/").pop() ?? key;
   return base.replace(/^\d+-/, "");
+}
+
+function normalizePreparedCardNumber(value: string | null | undefined): string | null {
+  const normalized = (value ?? "")
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .trim();
+  return /^[A-Z]{2,4}\d{0,2}-\d{2,4}$/.test(normalized) ? normalized : null;
+}
+
+function normalizePreparedArtist(value: string | null | undefined): string | null {
+  const normalized = (value ?? "")
+    .normalize("NFKC")
+    .replace(/^illust\.?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || null;
+}
+
+async function buildPreparedItemInsert(
+  batchId: string,
+  fileId: string,
+  input: PreparedScanItemInput,
+  artists: string[],
+): Promise<{
+  ordinal: number;
+  status: ItemStatus;
+  raw_card_number: string | null;
+  raw_artist: string | null;
+  card_number: string | null;
+  artist: string | null;
+  artist_present: boolean;
+  artist_confidence: string | null;
+  card_number_confidence: string | null;
+  fuzzy_artist: string | null;
+  fuzzy_artist_score: number | null;
+  fuzzy_artist_matched: boolean;
+  suggested_filename: string | null;
+  filename_slug: string | null;
+  duplicate_index: number;
+  processed_s3_key: string;
+  processed_url: string;
+  artist_crop_s3_key: string | null;
+  artist_crop_url: string | null;
+  footer_crop_s3_key: string | null;
+  footer_crop_url: string | null;
+  error: string | null;
+}> {
+  const rawCardNumber = normalizePreparedCardNumber(input.raw_card_number ?? input.card_number);
+  const rawArtist = input.artist_present
+    ? normalizePreparedArtist(input.raw_artist ?? input.artist)
+    : null;
+  const cardNumber = normalizePreparedCardNumber(input.card_number ?? rawCardNumber);
+  const artist = normalizePreparedArtist(input.artist ?? rawArtist);
+  const matchedArtist = matchArtistCandidate(artist, artists);
+  const acceptedArtist = matchedArtist.matched ? matchedArtist.artist : artist;
+  const baseStem = `${cardNumber ?? "unknown_card"}_${normalizeSlugPart(acceptedArtist, "unknown_artist")}`;
+  const duplicateResult = await query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM scan_ingest_items
+     WHERE batch_id = $1
+       AND (
+         filename_slug = $2
+         OR filename_slug LIKE $3
+       )`,
+    [batchId, baseStem, `${baseStem}__%`],
+  );
+  const duplicateIndex = parseInt(duplicateResult.rows[0]?.count ?? "0", 10);
+  const filenameStem = duplicateIndex > 0 ? `${baseStem}__${duplicateIndex + 1}` : baseStem;
+  const suggestedFilename = `${filenameStem}.png`;
+
+  return {
+    ordinal: input.ordinal,
+    status: cardNumber && input.processed_url ? "ready_to_link" : "pending_review",
+    raw_card_number: rawCardNumber,
+    raw_artist: rawArtist,
+    card_number: cardNumber,
+    artist: acceptedArtist,
+    artist_present: Boolean(input.artist_present),
+    artist_confidence: input.artist_confidence,
+    card_number_confidence: input.card_number_confidence,
+    fuzzy_artist: matchedArtist.artist,
+    fuzzy_artist_score: matchedArtist.score,
+    fuzzy_artist_matched: matchedArtist.matched,
+    suggested_filename: suggestedFilename,
+    filename_slug: filenameStem,
+    duplicate_index: duplicateIndex,
+    processed_s3_key: input.processed_s3_key,
+    processed_url: input.processed_url,
+    artist_crop_s3_key: input.artist_crop_s3_key,
+    artist_crop_url: input.artist_crop_url,
+    footer_crop_s3_key: input.footer_crop_s3_key,
+    footer_crop_url: input.footer_crop_url,
+    error: input.error,
+  };
 }
 
 async function syncBatchFilesFromS3(batchId: string): Promise<void> {
@@ -346,6 +460,64 @@ export async function adminScansRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post<{ Body: { file_name?: unknown; content_type?: unknown; folder?: unknown } }>(
+    "/scan-batches/:batch_id/assets/presign",
+    async (req, reply) => {
+      const { batch_id } = req.params as { batch_id: string };
+      const body = req.body ?? {};
+      const fileName = typeof body.file_name === "string" ? body.file_name.trim() : "";
+      const contentType = typeof body.content_type === "string" ? body.content_type.trim() : "image/png";
+      const folder = typeof body.folder === "string" ? body.folder.trim() : "";
+
+      if (!fileName) {
+        reply.code(400);
+        return { error: { status: 400, message: "file_name is required" } };
+      }
+
+      const batch = await query<{ id: string; processed_prefix: string }>(
+        `SELECT id, processed_prefix
+         FROM scan_ingest_batches
+         WHERE id = $1
+         LIMIT 1`,
+        [batch_id],
+      );
+      if (batch.rows.length === 0) {
+        reply.code(404);
+        return { error: { status: 404, message: "Scan batch not found" } };
+      }
+
+      const safeName = fileName.replace(/[^A-Za-z0-9._-]+/g, "_");
+      const safeFolder = folder
+        .split("/")
+        .map((segment) => segment.replace(/[^A-Za-z0-9._-]+/g, "_"))
+        .filter(Boolean)
+        .join("/");
+      const key = safeFolder
+        ? `${batch.rows[0].processed_prefix}/${batch_id}/${safeFolder}/${safeName}`
+        : `${batch.rows[0].processed_prefix}/${batch_id}/${safeName}`;
+      const s3 = getScanIngestS3Config();
+      const client = getS3Client(s3.region);
+      const uploadUrl = await getSignedUrl(
+        client,
+        new PutObjectCommand({
+          Bucket: s3.bucket,
+          Key: key,
+          ContentType: contentType || "image/png",
+        }),
+        { expiresIn: 900 },
+      );
+
+      return {
+        data: {
+          upload_url: uploadUrl,
+          s3_key: key,
+          public_url: buildPublicUrl(s3.publicBaseUrl, key),
+          content_type: contentType || "image/png",
+        },
+      };
+    },
+  );
+
   app.post<{ Body: { file_name?: unknown; content_type?: unknown; data_base64?: unknown; s3_key?: unknown; public_url?: unknown } }>(
     "/scan-batches/:batch_id/files",
     { bodyLimit: 40 * 1024 * 1024 },
@@ -425,6 +597,148 @@ export async function adminScansRoutes(app: FastifyInstance) {
       );
 
       return { data: inserted.rows[0] };
+    },
+  );
+
+  app.post<{ Body: { file_id?: unknown; detected_cards?: unknown; items?: unknown[] } }>(
+    "/scan-batches/:batch_id/import-prepared",
+    async (req, reply) => {
+      const { batch_id } = req.params as { batch_id: string };
+      const body = req.body ?? {};
+      const fileId = typeof body.file_id === "string" ? body.file_id.trim() : "";
+      const detectedCards = typeof body.detected_cards === "number" && Number.isInteger(body.detected_cards)
+        ? body.detected_cards
+        : Number.NaN;
+      const items = Array.isArray(body.items) ? body.items : null;
+
+      if (!fileId) {
+        reply.code(400);
+        return { error: { status: 400, message: "file_id is required" } };
+      }
+      if (!Number.isInteger(detectedCards) || detectedCards < 0) {
+        reply.code(400);
+        return { error: { status: 400, message: "detected_cards must be a non-negative integer" } };
+      }
+      if (!items) {
+        reply.code(400);
+        return { error: { status: 400, message: "items must be an array" } };
+      }
+
+      const fileResult = await query<{ id: string; batch_id: string }>(
+        `SELECT id, batch_id
+         FROM scan_ingest_files
+         WHERE id = $1
+           AND batch_id = $2
+         LIMIT 1`,
+        [fileId, batch_id],
+      );
+      if (fileResult.rows.length === 0) {
+        reply.code(404);
+        return { error: { status: 404, message: "Scan batch file not found" } };
+      }
+
+      const artists = await fetchArtistCatalog();
+      await query(`DELETE FROM scan_ingest_items WHERE file_id = $1`, [fileId]);
+
+      for (const item of items) {
+        const input = (item ?? {}) as Record<string, unknown>;
+        const prepared = await buildPreparedItemInsert(batch_id, fileId, {
+          ordinal: typeof input.ordinal === "number" && Number.isInteger(input.ordinal) ? input.ordinal : 0,
+          raw_card_number: typeof input.raw_card_number === "string" ? input.raw_card_number : null,
+          raw_artist: typeof input.raw_artist === "string" ? input.raw_artist : null,
+          card_number: typeof input.card_number === "string" ? input.card_number : null,
+          artist: typeof input.artist === "string" ? input.artist : null,
+          artist_present: Boolean(input.artist_present),
+          artist_confidence: typeof input.artist_confidence === "string" ? input.artist_confidence : null,
+          card_number_confidence: typeof input.card_number_confidence === "string" ? input.card_number_confidence : null,
+          processed_s3_key: typeof input.processed_s3_key === "string" ? input.processed_s3_key : "",
+          processed_url: typeof input.processed_url === "string" ? input.processed_url : "",
+          artist_crop_s3_key: typeof input.artist_crop_s3_key === "string" ? input.artist_crop_s3_key : null,
+          artist_crop_url: typeof input.artist_crop_url === "string" ? input.artist_crop_url : null,
+          footer_crop_s3_key: typeof input.footer_crop_s3_key === "string" ? input.footer_crop_s3_key : null,
+          footer_crop_url: typeof input.footer_crop_url === "string" ? input.footer_crop_url : null,
+          error: typeof input.error === "string" ? input.error : null,
+        }, artists);
+
+        if (!prepared.processed_s3_key || !prepared.processed_url) {
+          reply.code(400);
+          return { error: { status: 400, message: "Each prepared item must include processed_s3_key and processed_url" } };
+        }
+
+        await query(
+          `INSERT INTO scan_ingest_items (
+             batch_id,
+             file_id,
+             ordinal,
+             status,
+             raw_card_number,
+             raw_artist,
+             card_number,
+             artist,
+             artist_present,
+             artist_confidence,
+             card_number_confidence,
+             fuzzy_artist,
+             fuzzy_artist_score,
+             fuzzy_artist_matched,
+             suggested_filename,
+             filename_slug,
+             duplicate_index,
+             processed_s3_key,
+             processed_url,
+             artist_crop_s3_key,
+             artist_crop_url,
+             footer_crop_s3_key,
+             footer_crop_url,
+             error
+           )
+           VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+             $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+             $21, $22, $23, $24
+           )`,
+          [
+            batch_id,
+            fileId,
+            prepared.ordinal,
+            prepared.status,
+            prepared.raw_card_number,
+            prepared.raw_artist,
+            prepared.card_number,
+            prepared.artist,
+            prepared.artist_present,
+            prepared.artist_confidence,
+            prepared.card_number_confidence,
+            prepared.fuzzy_artist,
+            prepared.fuzzy_artist_score,
+            prepared.fuzzy_artist_matched,
+            prepared.suggested_filename,
+            prepared.filename_slug,
+            prepared.duplicate_index,
+            prepared.processed_s3_key,
+            prepared.processed_url,
+            prepared.artist_crop_s3_key,
+            prepared.artist_crop_url,
+            prepared.footer_crop_s3_key,
+            prepared.footer_crop_url,
+            prepared.error,
+          ],
+        );
+      }
+
+      await query(
+        `UPDATE scan_ingest_files
+         SET status = 'processed',
+             detected_cards = $2,
+             processed_at = NOW(),
+             error = NULL,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [fileId, detectedCards],
+      );
+
+      await refreshBatchStatus(batch_id);
+      return { data: { file_id: fileId, detected_cards: detectedCards, imported_items: items.length } };
     },
   );
 

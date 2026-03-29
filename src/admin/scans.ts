@@ -494,6 +494,10 @@ export async function adminScansRoutes(app: FastifyInstance) {
         duplicate_index: number;
         processed_s3_key: string | null;
         processed_url: string | null;
+        artist_crop_s3_key: string | null;
+        artist_crop_url: string | null;
+        footer_crop_s3_key: string | null;
+        footer_crop_url: string | null;
         linked_card_id: string | null;
         linked_card_image_id: string | null;
         review_notes: string | null;

@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
+import { formatBlockIsLegalSql, resolveFormatBlockRotationInput } from "../formatLegality.js";
 
 type BanType = "banned" | "restricted" | "pair";
 
@@ -95,7 +96,7 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
         legal: boolean;
         rotated_at: string | null;
       }>(
-        `SELECT id, format_id, block, legal, rotated_at
+        `SELECT id, format_id, block, ${formatBlockIsLegalSql("format_legal_blocks")} AS legal, rotated_at
          FROM format_legal_blocks
          ORDER BY block`,
       ),
@@ -370,15 +371,13 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
       reply.code(400);
       return { error: { status: 400, message: "block is required" } };
     }
-    if (typeof body.legal !== "boolean") {
-      reply.code(400);
-      return { error: { status: 400, message: "legal must be a boolean" } };
-    }
 
-    const rotatedAt = body.rotated_at == null ? null : String(body.rotated_at);
-    if (rotatedAt && Number.isNaN(Date.parse(rotatedAt))) {
+    let rotationState;
+    try {
+      rotationState = resolveFormatBlockRotationInput(body);
+    } catch (error: any) {
       reply.code(400);
-      return { error: { status: 400, message: "rotated_at must be a valid date" } };
+      return { error: { status: 400, message: error.message } };
     }
 
     const existing = await query<{ id: string }>(
@@ -394,13 +393,13 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
         `UPDATE format_legal_blocks
          SET legal = $1, rotated_at = $2
          WHERE id = $3`,
-        [body.legal, rotatedAt, existing.rows[0].id],
+        [rotationState.legal, rotationState.rotatedAt, existing.rows[0].id],
       );
     } else {
       await query(
         `INSERT INTO format_legal_blocks (format_id, block, legal, rotated_at)
          VALUES ($1, $2, $3, $4)`,
-        [format.id, body.block, body.legal, rotatedAt],
+        [format.id, body.block, rotationState.legal, rotationState.rotatedAt],
       );
     }
 

@@ -4,6 +4,7 @@ import { parseSearch, SearchNode } from "../search/parser.js";
 import { compileSearch } from "../search/compiler.js";
 import { CARD_RARITY_ORDER_SQL, normalizeCardRarity } from "../rarity.js";
 import { artistFilterSql, artistSortSql } from "../artist.js";
+import { formatBlockIsLegalSql } from "../formatLegality.js";
 
 /** Extract order:/direction: values from the AST and return them */
 function extractInlineSort(node: SearchNode): { order?: string; direction?: string } {
@@ -456,7 +457,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         legal: boolean;
       }>(
         `SELECT f.name AS format_name,
-                BOOL_AND(flb.legal) AS legal
+                COALESCE(BOOL_AND(${formatBlockIsLegalSql("flb")}), false) AS legal
          FROM formats f
          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = $1
          GROUP BY f.id, f.name`,

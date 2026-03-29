@@ -775,11 +775,11 @@ export async function adminScansRoutes(app: FastifyInstance) {
            scan_derivative_requested_at = NOW(),
            scan_derivative_processed_at = NULL,
            artist = CASE
-             WHEN (artist IS NULL OR btrim(artist) = '') AND $4 IS NOT NULL AND btrim($4) <> '' THEN $4
+             WHEN (artist IS NULL OR btrim(artist) = '') AND $4::text IS NOT NULL AND btrim($4::text) <> '' THEN $4::text
              ELSE artist
            END,
            artist_source = CASE
-             WHEN (artist IS NULL OR btrim(artist) = '') AND $4 IS NOT NULL AND btrim($4) <> '' THEN 'manual'
+             WHEN (artist IS NULL OR btrim(artist) = '') AND $4::text IS NOT NULL AND btrim($4::text) <> '' THEN 'manual'
              ELSE artist_source
            END
        WHERE id = $1`,
@@ -825,5 +825,25 @@ export async function adminScansRoutes(app: FastifyInstance) {
     });
 
     return { data: result };
+  });
+
+  app.get("/scan-derivatives/status", async () => {
+    const counts = await query<{ status: string; count: string }>(
+      `SELECT scan_derivative_status AS status, COUNT(*)::text AS count
+       FROM card_images
+       WHERE scan_source_s3_key IS NOT NULL
+       GROUP BY scan_derivative_status`,
+    );
+
+    const byStatus = new Map(counts.rows.map((row) => [row.status, Number(row.count)]));
+
+    return {
+      data: {
+        pending: byStatus.get("pending") ?? 0,
+        processing: byStatus.get("processing") ?? 0,
+        failed: byStatus.get("failed") ?? 0,
+        succeeded: byStatus.get("succeeded") ?? 0,
+      },
+    };
   });
 }

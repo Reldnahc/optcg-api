@@ -93,6 +93,12 @@ npm run build    # tsc
 npm start        # node dist/index.js
 ```
 
+## Deployment Discipline
+
+- CI/CD is the source of truth for production. Do not manually build/push the API image or force ECS deployments as the default path.
+- If a manual hotfix deploy is explicitly required, commit and push the matching source changes in the same turn so the repo and production are realigned immediately.
+- When discussing deploys, say clearly whether the work is going through the normal commit-driven pipeline or a temporary emergency override.
+
 ## Git Workflow
 
 - Do not work directly on `main` by default.

@@ -13,6 +13,7 @@ import { adminAuthRoutes } from "./admin/auth.js";
 import { adminCardsRoutes } from "./admin/cards.js";
 import { adminFormatsRoutes } from "./admin/formats.js";
 import { adminScraperRoutes } from "./admin/scraper.js";
+import { adminScansRoutes } from "./admin/scans.js";
 import { adminAuth } from "./middleware/adminAuth.js";
 
 const app = Fastify({ logger: true });
@@ -96,6 +97,7 @@ app.register(async (adminApp) => {
     protectedAdminApp.register(adminCardsRoutes);
     protectedAdminApp.register(adminFormatsRoutes);
     protectedAdminApp.register(adminScraperRoutes);
+    protectedAdminApp.register(adminScansRoutes);
   });
 }, { prefix: "/admin" });
 

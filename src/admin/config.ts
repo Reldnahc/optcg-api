@@ -47,9 +47,49 @@ export type EcsTaskPrefix =
   | "WATCHER"
   | "FORMATS"
   | "OCR"
+  | "SCANS"
   | "THUMBS"
   | "WIPE"
   | "VARIANT_MERGE";
+
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function defaultS3PublicBaseUrl(bucket: string, region: string): string {
+  if (region === "us-east-1") {
+    return `https://${bucket}.s3.amazonaws.com`;
+  }
+  return `https://${bucket}.s3.${region}.amazonaws.com`;
+}
+
+export function getScanIngestS3Config(): {
+  bucket: string;
+  region: string;
+  publicBaseUrl: string;
+  rawPrefix: string;
+  processedPrefix: string;
+} {
+  const region = process.env.AWS_REGION || "us-east-1";
+  const bucket = process.env.SCAN_INGEST_S3_BUCKET || process.env.S3_IMAGE_BUCKET;
+  if (!bucket) {
+    throw new Error("Missing required environment variable: SCAN_INGEST_S3_BUCKET or S3_IMAGE_BUCKET");
+  }
+
+  const publicBaseUrl = trimTrailingSlashes(
+    process.env.SCAN_INGEST_S3_PUBLIC_BASE_URL
+      || process.env.S3_PUBLIC_BASE_URL
+      || defaultS3PublicBaseUrl(bucket, region),
+  );
+
+  return {
+    bucket,
+    region,
+    publicBaseUrl,
+    rawPrefix: trimTrailingSlashes(process.env.SCAN_INGEST_S3_RAW_PREFIX || "scan-ingest/raw"),
+    processedPrefix: trimTrailingSlashes(process.env.SCAN_INGEST_S3_PROCESSED_PREFIX || "scan-ingest/processed"),
+  };
+}
 
 export function getEcsTaskConfig(prefix: EcsTaskPrefix): EcsTaskConfig | null {
   const cluster = process.env[`${prefix}_ECS_CLUSTER`];

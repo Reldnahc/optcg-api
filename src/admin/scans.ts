@@ -821,7 +821,7 @@ export async function adminScansRoutes(app: FastifyInstance) {
     }
 
     const result = await runConfiguredTask("SCANS", {
-      command: ["process-scan-derivatives"],
+      command: ["cli", "process-scan-derivatives"],
     });
 
     return { data: result };

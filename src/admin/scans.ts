@@ -805,24 +805,25 @@ export async function adminScansRoutes(app: FastifyInstance) {
       [item_id, cardNumberInput, image.card_id, image.card_image_id],
     );
 
-    let taskResult: { tasks: unknown[]; failures: unknown[] } | null = null;
-    let taskError: string | null = null;
-    try {
-      taskResult = await runConfiguredTask("SCANS", {
-        command: ["process-scan-derivatives"],
-      });
-    } catch (error) {
-      taskError = error instanceof Error ? error.message : String(error);
-    }
-
     await refreshBatchStatus(updated.rows[0].batch_id);
     return {
       data: {
         ...updated.rows[0],
         derivative_status: "pending",
       },
-      task: taskResult,
-      task_error: taskError,
     };
+  });
+
+  app.post("/scan-derivatives/process", async (req, reply) => {
+    if (await hasRunningTask("SCANS")) {
+      reply.code(409);
+      return { error: { status: 409, message: "A scan processing task is already running" } };
+    }
+
+    const result = await runConfiguredTask("SCANS", {
+      command: ["process-scan-derivatives"],
+    });
+
+    return { data: result };
   });
 }

@@ -402,6 +402,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         variant_index: number;
         image_url: string | null;
         scan_url: string | null;
+        scan_thumb_url: string | null;
         artist: string | null;
         label: string | null;
         classified: boolean;
@@ -416,7 +417,7 @@ export async function cardsRoutes(app: FastifyInstance) {
         high_price: string | null;
         sub_type: string | null;
       }>(
-        `SELECT ci.variant_index, ci.image_url, ci.scan_url,
+        `SELECT ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified, ci.is_default,
                 ip.name AS product_name, ip.released_at AS product_released_at,
@@ -491,6 +492,7 @@ export async function cardsRoutes(app: FastifyInstance) {
       variant_index: number;
       image_url: string | null;
       scan_url: string | null;
+      scan_thumb_url: string | null;
       artist: string | null;
       label: string | null;
       is_default: boolean;
@@ -514,6 +516,7 @@ export async function cardsRoutes(app: FastifyInstance) {
           variant_index: img.variant_index,
           image_url: img.image_url,
           scan_url: img.scan_url,
+          scan_thumb_url: img.scan_thumb_url,
           artist: img.artist,
           label: img.label,
           is_default: img.is_default,
@@ -598,10 +601,11 @@ export async function cardsRoutes(app: FastifyInstance) {
           const dateB = b.product_released_at ?? "";
           if (dateA !== dateB) return dateA < dateB ? -1 : 1;
           return a.variant_index - b.variant_index;
-        }).map(({ is_default: _, product_released_at: __, scan_url, ...rest }) => ({
+        }).map(({ is_default: _, product_released_at: __, scan_url, scan_thumb_url, ...rest }) => ({
           ...rest,
           thumbnail_url: thumbnailUrl(rest.image_url),
           ...(scan_url ? { scan_url } : {}),
+          ...(scan_thumb_url ? { scan_thumb_url } : {}),
         })),
         legality: legalityObj,
         available_languages: languages.rows.map((r) => r.language),

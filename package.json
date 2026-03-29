@@ -16,7 +16,8 @@
     "@aws-sdk/s3-request-presigner": "^3.1019.0",
     "dotenv": "^17.3.1",
     "fastify": "^5.3.3",
-    "optcg-db": "^0.4.2"
+    "optcg-db": "^0.4.2",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

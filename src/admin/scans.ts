@@ -1,7 +1,8 @@
-import { ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
+import sharp from "sharp";
 import { getScanIngestS3Config } from "./config.js";
 import { hasRunningTask, runConfiguredTask } from "./tasks.js";
 
@@ -15,6 +16,10 @@ interface ArtistMatch {
 }
 
 let s3Client: S3Client | null = null;
+const PUBLIC_SCAN_WIDTH = 868;
+const PUBLIC_SCAN_HEIGHT = 1213;
+const PUBLIC_SCAN_THUMB_WIDTH = 220;
+const PUBLIC_SCAN_THUMB_HEIGHT = 307;
 
 function getS3Client(region: string): S3Client {
   if (!s3Client) {
@@ -25,6 +30,82 @@ function getS3Client(region: string): S3Client {
 
 function buildPublicUrl(baseUrl: string, key: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${key}`;
+}
+
+async function downloadS3Object(region: string, bucket: string, key: string): Promise<Buffer> {
+  const client = getS3Client(region);
+  const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const body = await result.Body?.transformToByteArray();
+  if (!body) {
+    throw new Error(`Empty S3 object body for ${key}`);
+  }
+  return Buffer.from(body);
+}
+
+async function uploadPublicPng(region: string, bucket: string, key: string, body: Buffer): Promise<void> {
+  const client = getS3Client(region);
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: "image/png",
+    CacheControl: "public, max-age=31536000, immutable",
+  }));
+}
+
+async function uploadPublicWebp(region: string, bucket: string, key: string, body: Buffer): Promise<void> {
+  const client = getS3Client(region);
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: "image/webp",
+    CacheControl: "public, max-age=31536000, immutable",
+  }));
+}
+
+async function renderPublicScanDerivative(source: Buffer): Promise<Buffer> {
+  return sharp(source)
+    .flatten({ background: "#ffffff" })
+    .resize({
+      width: PUBLIC_SCAN_WIDTH,
+      height: PUBLIC_SCAN_HEIGHT,
+      fit: "cover",
+      position: "centre",
+    })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
+async function renderPublicScanThumbnail(source: Buffer): Promise<Buffer> {
+  return sharp(source)
+    .flatten({ background: "#ffffff" })
+    .resize({
+      width: PUBLIC_SCAN_THUMB_WIDTH,
+      height: PUBLIC_SCAN_THUMB_HEIGHT,
+      fit: "cover",
+      position: "centre",
+    })
+    .webp({ quality: 76 })
+    .toBuffer();
+}
+
+function buildLinkedVariantScanKey(
+  processedPrefix: string,
+  language: string,
+  cardNumber: string,
+  variantIndex: number,
+): string {
+  return `${processedPrefix}/linked/${language}/${cardNumber.toLowerCase()}/variant-${variantIndex}.png`;
+}
+
+function buildLinkedVariantScanThumbKey(
+  processedPrefix: string,
+  language: string,
+  cardNumber: string,
+  variantIndex: number,
+): string {
+  return `${processedPrefix}/linked/${language}/${cardNumber.toLowerCase()}/variant-${variantIndex}-thumb.webp`;
 }
 
 function normalizeSlugPart(value: string | null | undefined, fallback: string): string {
@@ -721,10 +802,11 @@ export async function adminScansRoutes(app: FastifyInstance) {
     const itemResult = await query<{
       id: string;
       batch_id: string;
+      processed_s3_key: string | null;
       processed_url: string | null;
       artist: string | null;
     }>(
-      `SELECT id, batch_id, processed_url, artist
+      `SELECT id, batch_id, processed_s3_key, processed_url, artist
        FROM scan_ingest_items
        WHERE id = $1
        LIMIT 1`,
@@ -736,9 +818,9 @@ export async function adminScansRoutes(app: FastifyInstance) {
     }
 
     const item = itemResult.rows[0];
-    if (!item.processed_url) {
+    if (!item.processed_url || !item.processed_s3_key) {
       reply.code(400);
-      return { error: { status: 400, message: "Scan item has no processed image URL yet" } };
+      return { error: { status: 400, message: "Scan item has no processed image source yet" } };
     }
 
     const imageResult = await query<{
@@ -762,19 +844,34 @@ export async function adminScansRoutes(app: FastifyInstance) {
     }
 
     const image = imageResult.rows[0];
+    const s3 = getScanIngestS3Config();
+    const sourceBuffer = await downloadS3Object(s3.region, s3.bucket, item.processed_s3_key);
+    const publicDerivative = await renderPublicScanDerivative(sourceBuffer);
+    const publicThumb = await renderPublicScanThumbnail(sourceBuffer);
+    const publicScanKey = buildLinkedVariantScanKey(s3.processedPrefix, language, cardNumberInput, variantIndex);
+    const publicScanThumbKey = buildLinkedVariantScanThumbKey(s3.processedPrefix, language, cardNumberInput, variantIndex);
+    await uploadPublicPng(s3.region, s3.bucket, publicScanKey, publicDerivative);
+    await uploadPublicWebp(s3.region, s3.bucket, publicScanThumbKey, publicThumb);
+    const publicScanUrl = buildPublicUrl(s3.publicBaseUrl, publicScanKey);
+    const publicScanThumbUrl = buildPublicUrl(s3.publicBaseUrl, publicScanThumbKey);
+
     await query(
       `UPDATE card_images
        SET scan_url = $2,
+           scan_thumb_s3_key = $3,
+           scan_thumb_url = $4,
+           scan_source_s3_key = $5,
+           scan_source_url = $6,
            artist = CASE
-             WHEN (artist IS NULL OR btrim(artist) = '') AND $3 IS NOT NULL AND btrim($3) <> '' THEN $3
+             WHEN (artist IS NULL OR btrim(artist) = '') AND $7 IS NOT NULL AND btrim($7) <> '' THEN $7
              ELSE artist
            END,
            artist_source = CASE
-             WHEN (artist IS NULL OR btrim(artist) = '') AND $3 IS NOT NULL AND btrim($3) <> '' THEN 'manual'
+             WHEN (artist IS NULL OR btrim(artist) = '') AND $7 IS NOT NULL AND btrim($7) <> '' THEN 'manual'
              ELSE artist_source
            END
        WHERE id = $1`,
-      [image.card_image_id, item.processed_url, item.artist],
+      [image.card_image_id, publicScanUrl, publicScanThumbKey, publicScanThumbUrl, item.processed_s3_key, item.processed_url, item.artist],
     );
 
     const updated = await query<{

@@ -8,6 +8,7 @@ import {
   setName,
   thumbnailUrl,
 } from "../format.js";
+import { formatBlockIsLegalSql } from "../formatLegality.js";
 import { normalizeCardRarity } from "../rarity.js";
 
 const CARD_TYPES = new Set(["Leader", "Character", "Event", "Stage"]);
@@ -251,7 +252,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         legal: boolean;
       }>(
         `SELECT f.name AS format_name,
-                BOOL_AND(flb.legal) AS legal
+                COALESCE(BOOL_AND(${formatBlockIsLegalSql("flb")}), false) AS legal
          FROM formats f
          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = $1
          GROUP BY f.id, f.name`,

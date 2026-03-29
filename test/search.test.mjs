@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Fastify from "fastify";
 import { closePool } from "optcg-db/db/client.js";
 import { cardsRoutes } from "../dist/routes/cards.js";
+import { deriveFormatBlockLegal, resolveFormatBlockRotationInput } from "../dist/formatLegality.js";
 import { compileSearch } from "../dist/search/compiler.js";
 import { parseSearch } from "../dist/search/parser.js";
 
@@ -109,6 +110,31 @@ const tests = [
       assert.match(compiled.sql, /lower\(COALESCE\(c\.name, ''\)\) = lower\(\$1\)/);
       assert.match(compiled.sql, /regexp_replace\(lower\(COALESCE\(c\.name, ''\)\), '\[\^a-z0-9\]\+', '', 'g'\) = \$2/);
       assert.deepEqual(compiled.params, ["Monkey D. Luffy", "monkeydluffy"]);
+    },
+  },
+  {
+    name: "compiler derives legal format filtering from rotated_at",
+    fn: () => {
+      const compiled = compileSearch(parseSearch("legal:standard"), 1, "cards");
+      assert.match(compiled.sql, /flb\.rotated_at IS NULL OR flb\.rotated_at > CURRENT_TIMESTAMP/);
+      assert.doesNotMatch(compiled.sql, /flb\.legal = true/);
+      assert.deepEqual(compiled.params, ["standard"]);
+    },
+  },
+  {
+    name: "format block legality helper uses server time",
+    fn: () => {
+      const now = new Date("2026-03-29T12:00:00.000Z");
+
+      assert.equal(deriveFormatBlockLegal(null, now), true);
+      assert.equal(deriveFormatBlockLegal("2026-03-29T12:00:01.000Z", now), true);
+      assert.equal(deriveFormatBlockLegal("2026-03-29T12:00:00.000Z", now), false);
+      assert.equal(deriveFormatBlockLegal("2026-03-29T11:59:59.000Z", now), false);
+
+      assert.deepEqual(
+        resolveFormatBlockRotationInput({ legal: false }, now),
+        { legal: false, rotatedAt: now.toISOString() },
+      );
     },
   },
   {

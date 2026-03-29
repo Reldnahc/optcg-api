@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
+import { formatBlockIsLegalSql } from "../formatLegality.js";
 
 export async function formatsRoutes(app: FastifyInstance) {
   // GET /v1/formats
@@ -13,7 +14,7 @@ export async function formatsRoutes(app: FastifyInstance) {
       ban_count: string;
     }>(
       `SELECT f.id, f.name, f.description, f.has_rotation,
-              COUNT(DISTINCT flb.id) FILTER (WHERE flb.legal) AS legal_blocks,
+              COUNT(DISTINCT flb.id) FILTER (WHERE ${formatBlockIsLegalSql("flb")}) AS legal_blocks,
               COUNT(DISTINCT fb.id) FILTER (WHERE fb.unbanned_at IS NULL) AS ban_count
        FROM formats f
        LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id
@@ -60,7 +61,7 @@ export async function formatsRoutes(app: FastifyInstance) {
       legal: boolean;
       rotated_at: string | null;
     }>(
-      `SELECT block, legal, rotated_at
+      `SELECT block, ${formatBlockIsLegalSql("format_legal_blocks")} AS legal, rotated_at
        FROM format_legal_blocks WHERE format_id = $1
        ORDER BY block`,
       [format.id],

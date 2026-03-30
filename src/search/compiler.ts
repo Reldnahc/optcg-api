@@ -6,6 +6,7 @@ import { SearchNode, Operator } from "./parser.js";
 import { requireCardRarity } from "../rarity.js";
 import { artistFilterSql, normalizedArtistFilterSql } from "../artist.js";
 import { formatBlockIsLegalSql } from "../formatLegality.js";
+import { variantDisplayOrderSql } from "../format.js";
 
 export interface CompiledSearch {
   sql: string;
@@ -465,7 +466,14 @@ function compileFilter(
             AND sub_type IS NOT DISTINCT FROM tp.sub_type
           ORDER BY fetched_at DESC LIMIT 1
         ) lp ON true
-        WHERE ci.card_id = c.id AND ci.is_default = true
+        WHERE ci.id = (
+          SELECT ci2.id
+          FROM card_images ci2
+          LEFT JOIN products ip2 ON ip2.id = ci2.product_id
+          WHERE ci2.card_id = c.id AND ci2.classified = true
+          ORDER BY ${variantDisplayOrderSql("ci2", "ip2")}
+          LIMIT 1
+        )
           AND lp.market_price ${cmp} ${p}
       )`;
       return negated ? `NOT (${sql})` : sql;

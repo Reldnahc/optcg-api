@@ -42,7 +42,6 @@ const { app, assertDone } = await withCardsApp([
           artist: "Artist B",
           label: "Standard",
           classified: true,
-          is_default: true,
           product_name: "Later Product",
           product_set_code: "OP06",
           product_released_at: "2025-03-01T00:00:00.000Z",
@@ -62,7 +61,6 @@ const { app, assertDone } = await withCardsApp([
           artist: "Artist A",
           label: "Alternate Art",
           classified: true,
-          is_default: false,
           product_name: "Earlier Product",
           product_set_code: "OP05",
           product_released_at: "2025-01-01T00:00:00.000Z",
@@ -121,7 +119,7 @@ try {
   if (detailBody.data.variants.length > 0) {
     const firstVariant = detailBody.data.variants[0];
     assert.ok("variant_index" in firstVariant);
-    assert.ok("is_default" in firstVariant);
+    assert.ok(!("is_default" in firstVariant));
     assert.ok("product" in firstVariant);
     assert.ok("media" in firstVariant);
     assert.ok("market" in firstVariant);

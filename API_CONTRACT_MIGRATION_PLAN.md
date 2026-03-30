@@ -206,7 +206,6 @@ Planned contract cleanup:
 - rename `images` to `variants`
 - treat each entry as a structured variant record, not just an image
 - keep `variant_index` as the per-card variant identifier
-- include `is_default` in the response
 - group variant data around:
   - variant identity / display metadata
   - product metadata
@@ -222,7 +221,6 @@ Proposed variant shape:
 
 - `variant_index`
 - `label`
-- `is_default`
 - `artist`
 - `product`
 - `media`

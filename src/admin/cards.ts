@@ -203,7 +203,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         artist: string | null;
         label: string | null;
         classified: boolean;
-        is_default: boolean;
         product_name: string | null;
         product_set_code: string | null;
         product_released_at: string | null;
@@ -217,7 +216,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       }>(
         `SELECT ci.product_id, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
                 ci.artist,
-                ci.label, ci.classified, ci.is_default,
+                ci.label, ci.classified,
                 ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
                 canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,
                 tp.tcgplayer_url, tp.sub_type,
@@ -305,7 +304,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       scan_thumb_url: string | null;
       artist: string | null;
       label: string | null;
-      is_default: boolean;
       product_name: string | null;
       product_set_code: string | null;
       product_released_at: string | null;
@@ -330,7 +328,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
           scan_thumb_url: img.scan_thumb_url,
           artist: img.artist,
           label: img.label,
-          is_default: img.is_default,
           product_name: img.product_name,
           product_set_code: img.product_set_code,
           product_released_at: img.product_released_at,
@@ -411,7 +408,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
             if (dateA !== dateB) return dateA < dateB ? -1 : 1;
             return a.variant_index - b.variant_index;
           })
-          .map(({ is_default: _, scan_url, scan_thumb_url, ...rest }) => ({
+          .map(({ scan_url, scan_thumb_url, ...rest }) => ({
             ...rest,
             thumbnail_url: thumbnailUrl(rest.image_url),
             ...(scan_url ? { scan_url } : {}),
@@ -683,8 +680,8 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       return { error: { status: 404, message: "Card not found" } };
     }
 
-    const existing = await query<{ id: string; is_default: boolean }>(
-      `SELECT id, is_default FROM card_images
+    const existing = await query<{ id: string }>(
+      `SELECT id FROM card_images
        WHERE card_id = $1 AND variant_index = $2`,
       [card.id, variantIndex],
     );
@@ -708,19 +705,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
        WHERE card_id = $1 AND variant_index = $2`,
       [card.id, variantIndex],
     );
-
-    if (existing.rows.some((row) => row.is_default)) {
-      const replacement = await query<{ id: string }>(
-        `SELECT id FROM card_images
-         WHERE card_id = $1
-         ORDER BY variant_index ASC
-         LIMIT 1`,
-        [card.id],
-      );
-      if (replacement.rows[0]) {
-        await query(`UPDATE card_images SET is_default = true WHERE id = $1`, [replacement.rows[0].id]);
-      }
-    }
 
     return { data: { deleted: existing.rows.length } };
   });
@@ -779,10 +763,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       if (body.classified !== undefined) {
         fields.push({ column: "classified", value: Boolean(body.classified) });
       }
-
-      if (body.is_default !== undefined) {
-        fields.push({ column: "is_default", value: Boolean(body.is_default) });
-      }
     } catch (error: any) {
       reply.code(400);
       return { error: { status: 400, message: error.message } };
@@ -791,10 +771,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     if (fields.length === 0) {
       reply.code(400);
       return { error: { status: 400, message: "No supported fields provided" } };
-    }
-
-    if (fields.some((field) => field.column === "is_default" && field.value === true)) {
-      await query(`UPDATE card_images SET is_default = false WHERE card_id = $1`, [card.id]);
     }
 
     const assignments = fields.map((field, index) => `${field.column} = $${index + 1}`);
@@ -810,14 +786,13 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       source_url: string | null;
       scan_url: string | null;
       artist: string | null;
-      is_default: boolean;
       label: string | null;
       classified: boolean;
     }>(
       `UPDATE card_images
        SET ${assignments.join(", ")}
        WHERE card_id = $${params.length - 1} AND variant_index = $${params.length}
-       RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, is_default, label, classified`,
+       RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, label, classified`,
       params,
     );
 
@@ -943,7 +918,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const artist = asOptionalString(body.artist, "artist") ?? null;
       const productId = asOptionalString(body.product_id, "product_id") ?? null;
       const classified = body.classified === undefined ? true : Boolean(body.classified);
-      const isDefault = body.is_default === undefined ? false : Boolean(body.is_default);
 
       let variantIndex: number;
       if (body.variant_index === undefined) {
@@ -970,10 +944,6 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         }
       }
 
-      if (isDefault) {
-        await query(`UPDATE card_images SET is_default = false WHERE card_id = $1`, [card.id]);
-      }
-
       const inserted = await query<{
         id: string;
         card_id: string;
@@ -983,16 +953,15 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         source_url: string | null;
         scan_url: string | null;
         artist: string | null;
-        is_default: boolean;
         label: string | null;
         classified: boolean;
       }>(
         `INSERT INTO card_images (
-           card_id, product_id, variant_index, image_url, source_url, scan_url, artist, is_default, label, classified
+           card_id, product_id, variant_index, image_url, source_url, scan_url, artist, label, classified
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, is_default, label, classified`,
-        [card.id, productId, variantIndex, imageUrl, sourceUrl, scanUrl, artist, isDefault, label, classified],
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, label, classified`,
+        [card.id, productId, variantIndex, imageUrl, sourceUrl, scanUrl, artist, label, classified],
       );
 
       return { data: inserted.rows[0] };

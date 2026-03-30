@@ -35,6 +35,7 @@ import {
   labelOrderSql,
   setName,
   thumbnailUrl,
+  variantDisplayOrderSql,
 } from "../format.js";
 
 type QueryExecutor = typeof query;
@@ -273,6 +274,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     const cardPriceJoin = `LEFT JOIN LATERAL (
          SELECT tp.tcgplayer_url, pr.market_price, pr.low_price, pr.mid_price, pr.high_price
          FROM card_images ci2
+         LEFT JOIN products ip2 ON ip2.id = ci2.product_id
          LEFT JOIN LATERAL (
            SELECT tp2.tcgplayer_product_id, tp2.tcgplayer_url, tp2.sub_type
            FROM tcgplayer_products tp2
@@ -288,7 +290,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
            ORDER BY fetched_at DESC LIMIT 1
          ) pr ON true
          WHERE ci2.card_id = c.id AND ci2.classified = true
-         ORDER BY ci2.is_default DESC, ${labelOrderSql("ci2")}, ci2.variant_index
+         ORDER BY ${variantDisplayOrderSql("ci2", "ip2")}
          LIMIT 1
        ) latest_price ON true`;
 
@@ -500,7 +502,6 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         artist: string | null;
         label: string | null;
         classified: boolean;
-        is_default: boolean;
         product_name: string | null;
         product_set_code: string | null;
         product_released_at: string | null;
@@ -514,7 +515,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       }>(
         `SELECT ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
                 ci.artist,
-                ci.label, ci.classified, ci.is_default,
+                ci.label, ci.classified,
                 ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
                 canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,
                 tp.tcgplayer_url, tp.sub_type,
@@ -586,7 +587,6 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     const imageMap = new Map<number, {
       variant_index: number;
       label: string | null;
-      is_default: boolean;
       artist: string | null;
       image_url: string | null;
       scan_url: string | null;
@@ -615,7 +615,6 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         entry = {
           variant_index: img.variant_index,
           label: img.label,
-          is_default: img.is_default,
           artist: img.artist,
           image_url: img.image_url,
           scan_url: img.scan_url,
@@ -661,7 +660,6 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     }).map((variant) => ({
       variant_index: variant.variant_index,
       label: variant.label,
-      is_default: variant.is_default,
       artist: variant.artist,
       product: variant.product,
       media: {

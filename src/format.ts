@@ -28,36 +28,48 @@ export function labelOrderSql(alias?: string): string {
 /** SQL CASE expression for ordering by label priority. Use in ORDER BY or subquery. */
 export const LABEL_ORDER_SQL = labelOrderSql();
 
+/** SQL expression for the public card-page variant ordering. */
+export function variantDisplayOrderSql(cardImageAlias: string, productAlias: string): string {
+  return [
+    `CASE WHEN ${productAlias}.released_at IS NULL THEN 1 ELSE 0 END`,
+    `${productAlias}.released_at ASC`,
+    labelOrderSql(cardImageAlias),
+    `${cardImageAlias}.variant_index`,
+  ].join(", ");
+}
+
 /** SQL subquery to get the best image_url for a card (by label priority). Bind card id column. */
 export function bestImageSubquery(cardIdExpr: string): string {
   return `(SELECT ci.image_url FROM card_images ci
+    LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
-    ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
+    ORDER BY ${variantDisplayOrderSql("ci", "ip")} LIMIT 1)`;
 }
 
 /** SQL subquery to get the best scan_url for a card using the same best-variant ordering. */
 export function bestScanUrlSubquery(cardIdExpr: string): string {
   return `(SELECT ci.scan_url FROM card_images ci
+    LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
-    ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
+    ORDER BY ${variantDisplayOrderSql("ci", "ip")} LIMIT 1)`;
 }
 
 /** SQL subquery to get the best scan thumbnail url for a card using the same best-variant ordering. */
 export function bestScanThumbSubquery(cardIdExpr: string): string {
   return `(SELECT ci.scan_thumb_url FROM card_images ci
+    LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
-    ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
+    ORDER BY ${variantDisplayOrderSql("ci", "ip")} LIMIT 1)`;
 }
 
 /** SQL subquery to get the most relevant non-null artist for a card. */
 export function bestArtistSubquery(cardIdExpr: string): string {
   return `(SELECT ci.artist FROM card_images ci
+    LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr}
     ORDER BY
       CASE WHEN NULLIF(BTRIM(COALESCE(ci.artist, '')), '') IS NULL THEN 1 ELSE 0 END,
-      ci.is_default DESC,
-      ${labelOrderSql("ci")},
-      ci.variant_index
+      ${variantDisplayOrderSql("ci", "ip")}
     LIMIT 1)`;
 }
 

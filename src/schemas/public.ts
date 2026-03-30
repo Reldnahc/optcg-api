@@ -266,11 +266,10 @@ const variantMarketPriceSchema = {
 const cardVariantSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["variant_index", "label", "is_default", "artist", "product", "media", "market"],
+  required: ["variant_index", "label", "artist", "product", "media", "market"],
   properties: {
     variant_index: { type: "integer" },
     label: nullable({ type: "string" }),
-    is_default: { type: "boolean" },
     artist: nullable({ type: "string" }),
     product: {
       type: "object",

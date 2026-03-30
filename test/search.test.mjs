@@ -1,21 +1,10 @@
 import assert from "node:assert/strict";
-import Fastify from "fastify";
-import { closePool } from "optcg-db/db/client.js";
-import { cardsRoutes } from "../dist/routes/cards.js";
 import { deriveFormatBlockLegal, resolveFormatBlockRotationInput } from "../dist/formatLegality.js";
 import { compileSearch } from "../dist/search/compiler.js";
 import { parseSearch } from "../dist/search/parser.js";
+import { createCardRow, withCardsApp } from "./helpers/cardsTestUtils.mjs";
 
-let app = null;
 let failures = 0;
-
-async function withApp() {
-  if (app) return app;
-  app = Fastify({ logger: false });
-  app.register(cardsRoutes, { prefix: "/v1" });
-  await app.ready();
-  return app;
-}
 
 async function runTest(name, fn) {
   try {
@@ -87,20 +76,45 @@ const tests = [
   {
     name: "route matches card names containing literal Not",
     fn: async () => {
-      const testApp = await withApp();
-      const response = await testApp.inject({
-        method: "GET",
-        url: "/v1/cards",
-        query: {
-          q: "I Do Not Forgive Those Who Laugh at My Family",
-          limit: "5",
-          unique: "cards",
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          result: { rows: [{ total: "1" }] },
         },
-      });
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql }) => {
+            assert.match(sql, /ORDER BY CASE/);
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP10-078",
+                name: "I Do Not Forgive Those Who Laugh at My Family",
+              }),
+            ],
+          },
+        },
+      ]);
 
-      assert.equal(response.statusCode, 200);
-      const body = response.json();
-      assert.equal(body.data[0].card_number, "OP10-078");
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "I Do Not Forgive Those Who Laugh at My Family",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP10-078");
+        assertDone();
+      } finally {
+        await app.close();
+      }
     },
   },
   {
@@ -140,86 +154,189 @@ const tests = [
   {
     name: "route supports filter-only product searches with relevance sort",
     fn: async () => {
-      const testApp = await withApp();
-      const response = await testApp.inject({
-        method: "GET",
-        url: "/v1/cards",
-        query: {
-          q: 'product="Anime 25th Collection"',
-          limit: "5",
-          unique: "prints",
-          sort: "relevance",
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          result: { rows: [{ total: "1" }] },
         },
-      });
+        {
+          match: "JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true",
+          assert: ({ sql }) => {
+            assert.doesNotMatch(sql, /WHEN lower\(COALESCE\(c\.name, ''\)\)/);
+            assert.match(sql, /ORDER BY c\.card_number ASC NULLS LAST, c\.card_number ASC, ci\.variant_index ASC/);
+          },
+          result: {
+            rows: [
+              {
+                ...createCardRow({ id: "card-print-1", card_number: "PRB01-001", name: "Luffy" }),
+                image_url: "https://example.com/print.png",
+                scan_url: "https://example.com/print-scan.png",
+                scan_thumb_url: "https://example.com/print-scan-thumb.webp",
+                tcgplayer_url: "https://example.com/tcgplayer/1",
+                market_price: "12.34",
+                low_price: "10.00",
+                mid_price: "12.00",
+                high_price: "15.00",
+                label: "Standard",
+                variant_index: 0,
+                variant_product_name: "Anime 25th Collection",
+              },
+            ],
+          },
+        },
+      ]);
 
-      assert.equal(response.statusCode, 200);
-      const body = response.json();
-      assert.ok(body.data.length > 0);
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: 'product="Anime 25th Collection"',
+            limit: "5",
+            unique: "prints",
+            sort: "relevance",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.ok(body.data.length > 0);
+        assert.equal(body.data[0].variant_product_name, "Anime 25th Collection");
+        assertDone();
+      } finally {
+        await app.close();
+      }
     },
   },
   {
     name: "route defaults q searches to relevance ordering",
     fn: async () => {
-      const testApp = await withApp();
-      const response = await testApp.inject({
-        method: "GET",
-        url: "/v1/cards",
-        query: {
-          q: "youre the one",
-          limit: "5",
-          unique: "cards",
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          result: { rows: [{ total: "3" }] },
         },
-      });
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql }) => {
+            assert.match(sql, /WHEN lower\(COALESCE\(c\.name, ''\)\) = lower\(/);
+            assert.match(sql, /ORDER BY CASE/);
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP06-115",
+                name: "You're the One Who Should Disappear.",
+              }),
+              createCardRow({ id: "card-2", card_number: "OP15-074", name: "Varie" }),
+              createCardRow({ id: "card-3", card_number: "OP15-075", name: "El Thor" }),
+            ],
+          },
+        },
+      ]);
 
-      assert.equal(response.statusCode, 200);
-      const body = response.json();
-      assert.equal(body.data[0].card_number, "OP06-115");
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "youre the one",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP06-115");
+        assertDone();
+      } finally {
+        await app.close();
+      }
     },
   },
   {
     name: "route preserves explicit non-relevance sorts",
     fn: async () => {
-      const testApp = await withApp();
-      const response = await testApp.inject({
-        method: "GET",
-        url: "/v1/cards",
-        query: {
-          q: "youre the one",
-          limit: "5",
-          unique: "cards",
-          sort: "card_number",
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          result: { rows: [{ total: "3" }] },
         },
-      });
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql }) => {
+            assert.doesNotMatch(sql, /WHEN lower\(COALESCE\(c\.name, ''\)\) = lower\(/);
+            assert.match(sql, /ORDER BY c\.card_number ASC NULLS LAST, c\.card_number ASC/);
+          },
+          result: {
+            rows: [
+              createCardRow({ id: "card-2", card_number: "OP01-002", name: "Another Card" }),
+              createCardRow({
+                card_number: "OP06-115",
+                name: "You're the One Who Should Disappear.",
+              }),
+            ],
+          },
+        },
+      ]);
 
-      assert.equal(response.statusCode, 200);
-      const body = response.json();
-      assert.notEqual(body.data[0].card_number, "OP06-115");
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "youre the one",
+            limit: "5",
+            unique: "cards",
+            sort: "card_number",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.notEqual(body.data[0].card_number, "OP06-115");
+        assertDone();
+      } finally {
+        await app.close();
+      }
     },
   },
   {
     name: "autocomplete keeps normalized phrase matches visible",
     fn: async () => {
-      const testApp = await withApp();
-      const response = await testApp.inject({
-        method: "GET",
-        url: "/v1/cards/autocomplete",
-        query: { q: "youre th" },
-      });
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT name",
+          assert: ({ sql }) => {
+            assert.match(sql, /regexp_replace\(lower\(name\), '\[\^a-z0-9\]\+', '', 'g'\)/);
+          },
+          result: {
+            rows: [{ name: "You're the One Who Should Disappear." }],
+          },
+        },
+      ]);
 
-      assert.equal(response.statusCode, 200);
-      const body = response.json();
-      assert.equal(body.data[0], "You're the One Who Should Disappear.");
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards/autocomplete",
+          query: { q: "youre th" },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0], "You're the One Who Should Disappear.");
+        assertDone();
+      } finally {
+        await app.close();
+      }
     },
   },
 ];
 
-try {
-  for (const { name, fn } of tests) {
-    await runTest(name, fn);
-  }
-} finally {
-  if (app) await app.close();
-  await closePool();
+for (const { name, fn } of tests) {
+  await runTest(name, fn);
 }
 
 if (failures > 0) {

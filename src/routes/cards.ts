@@ -37,6 +37,12 @@ import {
   thumbnailUrl,
 } from "../format.js";
 
+type QueryExecutor = typeof query;
+
+type CardsRoutesOptions = {
+  queryExecutor?: QueryExecutor;
+};
+
 const VALID_SORTS: Record<string, string> = {
   name: "c.name",
   cost: "c.cost",
@@ -81,7 +87,9 @@ function collectPositiveNameTerms(node: SearchNode): string[] {
   }
 }
 
-export async function cardsRoutes(app: FastifyInstance) {
+export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOptions = {}) {
+  const runQuery = options.queryExecutor ?? query;
+
   // GET /v1/cards — search/list
   app.get("/cards", { schema: cardsSearchRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
@@ -284,7 +292,7 @@ export async function cardsRoutes(app: FastifyInstance) {
     if (unique === "prints") {
       // One row per classified variant
       const [countResult, rows] = await Promise.all([
-        query<{ total: string }>(
+        runQuery<{ total: string }>(
           `SELECT COUNT(*) AS total
            FROM cards c
            JOIN products p ON p.id = c.product_id
@@ -293,7 +301,7 @@ export async function cardsRoutes(app: FastifyInstance) {
            WHERE ${where}`,
           filterParams,
         ),
-        query<CardRow & {
+        runQuery<CardRow & {
           image_url: string | null;
           scan_url: string | null;
           scan_thumb_url: string | null;
@@ -339,14 +347,14 @@ export async function cardsRoutes(app: FastifyInstance) {
 
     // unique=cards — one row per card (original behavior)
     const [countResult, rows] = await Promise.all([
-      query<{ total: string }>(
+      runQuery<{ total: string }>(
         `SELECT COUNT(*) AS total
          FROM cards c
          JOIN products p ON p.id = c.product_id
          WHERE ${where}`,
         filterParams,
       ),
-      query<CardRow & {
+      runQuery<CardRow & {
         image_url: string | null;
         scan_url: string | null;
         scan_thumb_url: string | null;
@@ -418,7 +426,7 @@ export async function cardsRoutes(app: FastifyInstance) {
 
     const params: unknown[] = [rawLike, normalizedLike, squeezedLike, q, normalizedQ, `${q}%`];
 
-    const rows = await query<{ name: string }>(
+    const rows = await runQuery<{ name: string }>(
       `SELECT name
        FROM (
          SELECT name,
@@ -443,7 +451,7 @@ export async function cardsRoutes(app: FastifyInstance) {
     const qs = req.query as Record<string, string>;
     const lang = qs.lang || "en";
 
-    const cardResult = await query<CardRow & { set_product_name: string | null }>(
+    const cardResult = await runQuery<CardRow & { set_product_name: string | null }>(
       `SELECT c.*, p.name AS product_name, p.released_at,
               (SELECT p2.name FROM products p2
                WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
@@ -464,7 +472,7 @@ export async function cardsRoutes(app: FastifyInstance) {
 
     // Run images, manga check, legality, and available languages in parallel
     const [images, hasManga, legality, cardBans, languages] = await Promise.all([
-      query<{
+      runQuery<{
         variant_index: number;
         image_url: string | null;
         scan_url: string | null;
@@ -513,11 +521,11 @@ export async function cardsRoutes(app: FastifyInstance) {
          ORDER BY ci.variant_index, ${tcgplayerProductOrderSql("tp")}`,
         [card.id],
       ),
-      query<{ exists: boolean }>(
+      runQuery<{ exists: boolean }>(
         `SELECT EXISTS(SELECT 1 FROM card_images ci WHERE ci.card_id = $1 AND ci.label = 'Manga Art') AS exists`,
         [card.id],
       ),
-      query<{
+      runQuery<{
         format_name: string;
         legal: boolean;
       }>(
@@ -528,7 +536,7 @@ export async function cardsRoutes(app: FastifyInstance) {
          GROUP BY f.id, f.name`,
         [card.block],
       ),
-      query<{
+      runQuery<{
         format_name: string;
         ban_type: string;
         max_copies: number | null;
@@ -542,7 +550,7 @@ export async function cardsRoutes(app: FastifyInstance) {
          WHERE fb.card_number = $1 AND fb.unbanned_at IS NULL`,
         [card.card_number],
       ),
-      query<{ language: string }>(
+      runQuery<{ language: string }>(
         `SELECT DISTINCT language FROM cards WHERE card_number ILIKE $1 ORDER BY language`,
         [card_number],
       ),

@@ -247,6 +247,24 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         ELSE 0
       END`;
     }
+    const relevanceActive = Boolean(useSearchRank && searchRankSql);
+    const requestedSort = (wantsRelevanceSort || (relevanceActive && !qs.sort && !inlineSortProvided))
+      ? "relevance"
+      : sortKey;
+    const requestedOrder = order === "DESC" ? "desc" : "asc";
+    const appliedSort = relevanceActive
+      ? "relevance"
+      : wantsRelevanceSort
+        ? "card_number"
+        : sortKey;
+    const appliedOrder = relevanceActive ? "desc" : requestedOrder;
+    const searchMeta = {
+      sort_requested: requestedSort,
+      sort_applied: appliedSort,
+      order_requested: requestedOrder,
+      order_applied: appliedOrder,
+      relevance_active: relevanceActive,
+    };
     const fallbackSortSql = sortCol ?? VALID_SORTS.card_number;
     const primaryOrderSql = useSearchRank && searchRankSql
       ? `${searchRankSql} DESC`
@@ -342,6 +360,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
           variant_product_name: row.variant_product_name,
         })),
         pagination: { page, limit, total, has_more: offset + limit < total },
+        meta: searchMeta,
       };
     }
 
@@ -384,6 +403,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     return {
       data: rows.rows.map(formatCard),
       pagination: { page, limit, total, has_more: offset + limit < total },
+      meta: searchMeta,
     };
   });
 

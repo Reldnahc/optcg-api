@@ -8,6 +8,7 @@ import {
   nullable,
   okEnvelopeSchema,
   paginatedEnvelopeSchema,
+  paginationSchema,
   setCodeParamSchema,
 } from "./common.js";
 
@@ -166,6 +167,48 @@ const cardPrintSummarySchema = {
     variant_product_name: nullable({ type: "string" }),
   },
 };
+
+const cardSearchSortEnum = [
+  "relevance",
+  "name",
+  "cost",
+  "power",
+  "card_number",
+  "released",
+  "rarity",
+  "color",
+  "market_price",
+  "artist",
+];
+
+const cardSearchMetaSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sort_requested", "sort_applied", "order_requested", "order_applied", "relevance_active"],
+  properties: {
+    sort_requested: { type: "string", enum: cardSearchSortEnum },
+    sort_applied: { type: "string", enum: cardSearchSortEnum },
+    order_requested: { type: "string", enum: ["asc", "desc"] },
+    order_applied: { type: "string", enum: ["asc", "desc"] },
+    relevance_active: { type: "boolean" },
+  },
+};
+
+function cardSearchEnvelopeSchema(itemSchema: Record<string, unknown>) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["data", "pagination", "meta"],
+    properties: {
+      data: {
+        type: "array",
+        items: itemSchema,
+      },
+      pagination: paginationSchema,
+      meta: cardSearchMetaSchema,
+    },
+  };
+}
 
 const cardSearchQuerySchema = {
   type: "object",
@@ -431,13 +474,13 @@ export const randomRouteSchema = {
 export const cardsSearchRouteSchema = {
   tags: ["Cards"],
   summary: "Search cards",
-  description: "Supports two result modes. `unique=cards` returns card-level rows. `unique=prints` returns classified variant rows.",
+  description: "Supports two result modes. `unique=cards` returns card-level rows. `unique=prints` returns classified variant rows. The `meta` object reports the requested sort and the sort that was actually applied after any relevance fallback.",
   querystring: cardSearchQuerySchema,
   response: {
     200: {
       oneOf: [
-        paginatedEnvelopeSchema(cardSummarySchema),
-        paginatedEnvelopeSchema(cardPrintSummarySchema),
+        cardSearchEnvelopeSchema(cardSummarySchema),
+        cardSearchEnvelopeSchema(cardPrintSummarySchema),
       ],
     },
     400: errorEnvelopeSchema,

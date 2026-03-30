@@ -263,13 +263,13 @@ async function syncBatchFilesFromS3(batchId: string): Promise<void> {
 
   if (keys.length === 0) return;
 
-  const existing = await query<{ s3_key: string }>(
+  const existing = await query<{ s3_key: string | null }>(
     `SELECT s3_key
      FROM scan_ingest_files
      WHERE batch_id = $1`,
     [batch.id],
   );
-  const existingKeys = new Set(existing.rows.map((row) => row.s3_key));
+  const existingKeys = new Set(existing.rows.map((row) => row.s3_key).filter((value): value is string => Boolean(value)));
 
   for (const key of keys) {
     if (existingKeys.has(key)) continue;
@@ -518,7 +518,7 @@ export async function adminScansRoutes(app: FastifyInstance) {
     },
   );
 
-  app.post<{ Body: { file_name?: unknown; content_type?: unknown; data_base64?: unknown; s3_key?: unknown; public_url?: unknown } }>(
+  app.post<{ Body: { file_name?: unknown; content_type?: unknown; data_base64?: unknown; s3_key?: unknown; public_url?: unknown; local_only?: unknown } }>(
     "/scan-batches/:batch_id/files",
     { bodyLimit: 40 * 1024 * 1024 },
     async (req, reply) => {
@@ -529,6 +529,7 @@ export async function adminScansRoutes(app: FastifyInstance) {
       const dataBase64 = typeof body.data_base64 === "string" ? body.data_base64.trim() : "";
       const providedS3Key = typeof body.s3_key === "string" ? body.s3_key.trim() : "";
       const providedPublicUrl = typeof body.public_url === "string" ? body.public_url.trim() : "";
+      const localOnly = body.local_only === true;
 
       if (!fileName) {
         reply.code(400);
@@ -541,8 +542,8 @@ export async function adminScansRoutes(app: FastifyInstance) {
         return { error: { status: 404, message: "Scan batch not found" } };
       }
 
-      let key = providedS3Key;
-      let publicUrl = providedPublicUrl;
+      let key: string | null = providedS3Key || null;
+      let publicUrl: string | null = providedPublicUrl || null;
       if (dataBase64) {
         const buffer = decodeBase64Payload(dataBase64);
         const safeName = fileName.replace(/[^A-Za-z0-9._-]+/g, "_");
@@ -561,17 +562,17 @@ export async function adminScansRoutes(app: FastifyInstance) {
         );
 
         publicUrl = buildPublicUrl(s3.publicBaseUrl, key);
-      } else if (!key || !publicUrl) {
+      } else if (!localOnly && (!key || !publicUrl)) {
         reply.code(400);
-        return { error: { status: 400, message: "Either data_base64 or s3_key/public_url is required" } };
+        return { error: { status: 400, message: "Either data_base64, s3_key/public_url, or local_only=true is required" } };
       }
 
       const inserted = await query<{
         id: string;
         batch_id: string;
         file_name: string;
-        s3_key: string;
-        public_url: string;
+        s3_key: string | null;
+        public_url: string | null;
         content_type: string | null;
         status: string;
         detected_cards: number | null;
@@ -771,8 +772,8 @@ export async function adminScansRoutes(app: FastifyInstance) {
         id: string;
         batch_id: string;
         file_name: string;
-        s3_key: string;
-        public_url: string;
+        s3_key: string | null;
+        public_url: string | null;
         content_type: string | null;
         status: string;
         detected_cards: number | null;
@@ -873,6 +874,20 @@ export async function adminScansRoutes(app: FastifyInstance) {
     if (fileCount === 0) {
       reply.code(400);
       return { error: { status: 400, message: "Upload at least one raw scan before processing" } };
+    }
+
+    const rawFileCountResult = await query<{ count: string }>(
+      `SELECT COUNT(*) AS count
+       FROM scan_ingest_files
+       WHERE batch_id = $1
+         AND s3_key IS NOT NULL
+         AND public_url IS NOT NULL`,
+      [batch_id],
+    );
+    const rawFileCount = parseInt(rawFileCountResult.rows[0]?.count ?? "0", 10);
+    if (rawFileCount === 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "This batch has no raw scan uploads to process" } };
     }
 
     try {

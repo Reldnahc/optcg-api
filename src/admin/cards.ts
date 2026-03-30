@@ -30,6 +30,21 @@ function asOptionalNumber(value: unknown, field: string): number | null | undefi
   return value;
 }
 
+function asOptionalDateString(value: unknown, field: string): string | null | undefined {
+  const parsed = asOptionalString(value, field);
+  if (parsed === undefined || parsed === null) return parsed;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(parsed)) {
+    throw new Error(`${field} must be in YYYY-MM-DD format`);
+  }
+
+  const date = new Date(`${parsed}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== parsed) {
+    throw new Error(`${field} must be a valid calendar date`);
+  }
+
+  return parsed;
+}
+
 function asOptionalStringArray(
   value: unknown,
   field: string,
@@ -180,6 +195,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
 
     const [images, legality, cardBans, languages] = await Promise.all([
       query<{
+        product_id: string | null;
         variant_index: number;
         image_url: string | null;
         scan_url: string | null;
@@ -199,7 +215,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         high_price: string | null;
         sub_type: string | null;
       }>(
-        `SELECT ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
+        `SELECT ci.product_id, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified, ci.is_default,
                 ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
@@ -282,6 +298,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     const isReleased = card.released_at ? new Date(card.released_at) <= now : false;
 
     const imageMap = new Map<number, {
+      product_id: string | null;
       variant_index: number;
       image_url: string | null;
       scan_url: string | null;
@@ -306,6 +323,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       let entry = imageMap.get(img.variant_index);
       if (!entry) {
         entry = {
+          product_id: img.product_id,
           variant_index: img.variant_index,
           image_url: img.image_url,
           scan_url: img.scan_url,
@@ -393,7 +411,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
             if (dateA !== dateB) return dateA < dateB ? -1 : 1;
             return a.variant_index - b.variant_index;
           })
-          .map(({ is_default: _, product_released_at: __, scan_url, scan_thumb_url, ...rest }) => ({
+          .map(({ is_default: _, scan_url, scan_thumb_url, ...rest }) => ({
             ...rest,
             thumbnail_url: thumbnailUrl(rest.image_url),
             ...(scan_url ? { scan_url } : {}),
@@ -516,6 +534,45 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     }
 
     return { data: formatCard(updated.rows[0]) };
+  });
+
+  app.put("/products/:product_id", async (req, reply) => {
+    const { product_id } = req.params as { product_id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    let releasedAt: string | null | undefined;
+    try {
+      releasedAt = asOptionalDateString(body.released_at, "released_at");
+    } catch (error: any) {
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    }
+
+    if (releasedAt === undefined) {
+      reply.code(400);
+      return { error: { status: 400, message: "No supported fields provided" } };
+    }
+
+    const updated = await query<{
+      id: string;
+      language: string;
+      name: string;
+      product_set_code: string | null;
+      released_at: string | null;
+    }>(
+      `UPDATE products
+       SET released_at = $1
+       WHERE id = $2
+       RETURNING id, language, name, product_set_code, released_at`,
+      [releasedAt, product_id],
+    );
+
+    if (updated.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "Product not found" } };
+    }
+
+    return { data: updated.rows[0] };
   });
 
   app.get("/cards/:card_number/tcgplayer-products", async (req, reply) => {

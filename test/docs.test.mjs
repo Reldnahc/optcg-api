@@ -41,6 +41,8 @@ try {
   assert.ok(spec.paths["/v1/random"]);
   assert.ok(spec.paths["/v1/sets"]);
   assert.ok(spec.paths["/v1/sets/{set_code}"]);
+  assert.match(JSON.stringify(spec.paths["/v1/sets"]), /card_count/);
+  assert.match(JSON.stringify(spec.paths["/v1/sets"]), /set_code/);
   assert.ok(!spec.paths["/admin/login"]);
   assert.ok(!spec.paths["/admin/formats"]);
   assert.ok(!spec.paths["/admin/prices/run"]);

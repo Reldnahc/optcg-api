@@ -181,6 +181,13 @@ const cardSearchSortEnum = [
   "artist",
 ];
 
+const setSortEnum = [
+  "name",
+  "card_count",
+  "released",
+  "set_code",
+];
+
 const cardSearchMetaSchema = {
   type: "object",
   additionalProperties: false,
@@ -389,8 +396,17 @@ export const formatDetailRouteSchema = {
 export const setsListRouteSchema = {
   tags: ["Sets"],
   summary: "List sets",
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      sort: { type: "string", enum: setSortEnum },
+      order: { type: "string", enum: ["asc", "desc"] },
+    },
+  },
   response: {
     200: okEnvelopeSchema({ type: "array", items: setSummarySchema }),
+    400: errorEnvelopeSchema,
   },
 };
 

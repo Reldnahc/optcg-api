@@ -1,10 +1,11 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { bestImageSubquery, setName, thumbnailUrl } from "../format.js";
+import { setDetailRouteSchema, setsListRouteSchema } from "../schemas/public.js";
 
 export async function setsRoutes(app: FastifyInstance) {
   // GET /v1/sets — all sets
-  app.get("/sets", async (_req, reply) => {
+  app.get("/sets", { schema: setsListRouteSchema }, async (_req, reply) => {
     const rows = await query<{
       true_set_code: string;
       product_name: string | null;
@@ -37,7 +38,7 @@ export async function setsRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/sets/:set_code
-  app.get("/sets/:set_code", async (req, reply) => {
+  app.get("/sets/:set_code", { schema: setDetailRouteSchema }, async (req, reply) => {
     const { set_code } = req.params as { set_code: string };
     const code = set_code.toUpperCase();
 

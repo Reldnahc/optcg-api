@@ -1,9 +1,10 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
+import { pricesRouteSchema } from "../schemas/public.js";
 
 export async function pricesRoute(app: FastifyInstance) {
   // GET /v1/prices/:card_number
-  app.get("/prices/:card_number", async (req, reply) => {
+  app.get("/prices/:card_number", { schema: pricesRouteSchema }, async (req, reply) => {
     const { card_number } = req.params as { card_number: string };
     const qs = req.query as Record<string, string>;
     const days = Math.min(365, Math.max(1, parseInt(qs.days || "30", 10)));

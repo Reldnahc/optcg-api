@@ -5,6 +5,11 @@ import { compileSearch } from "../search/compiler.js";
 import { CARD_RARITY_ORDER_SQL, normalizeCardRarity } from "../rarity.js";
 import { artistFilterSql, artistSortSql } from "../artist.js";
 import { formatBlockIsLegalSql } from "../formatLegality.js";
+import {
+  cardAutocompleteRouteSchema,
+  cardDetailRouteSchema,
+  cardsSearchRouteSchema,
+} from "../schemas/public.js";
 
 /** Extract order:/direction: values from the AST and return them */
 function extractInlineSort(node: SearchNode): { order?: string; direction?: string } {
@@ -19,7 +24,18 @@ function extractInlineSort(node: SearchNode): { order?: string; direction?: stri
   }
   return result;
 }
-import { formatCard, CardRow, LABEL_ORDER, labelOrder, LABEL_ORDER_SQL, bestImageSubquery, setName, thumbnailUrl } from "../format.js";
+import {
+  formatCard,
+  CardRow,
+  labelOrder,
+  LABEL_ORDER_SQL,
+  bestImageSubquery,
+  bestScanUrlSubquery,
+  bestScanThumbSubquery,
+  labelOrderSql,
+  setName,
+  thumbnailUrl,
+} from "../format.js";
 
 const VALID_SORTS: Record<string, string> = {
   name: "c.name",
@@ -67,7 +83,7 @@ function collectPositiveNameTerms(node: SearchNode): string[] {
 
 export async function cardsRoutes(app: FastifyInstance) {
   // GET /v1/cards — search/list
-  app.get("/cards", async (req, reply) => {
+  app.get("/cards", { schema: cardsSearchRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
 
     const page = Math.max(1, parseInt(qs.page || "1", 10));
@@ -228,17 +244,40 @@ export async function cardsRoutes(app: FastifyInstance) {
       ? `${searchRankSql} DESC`
       : `${fallbackSortSql} ${order} NULLS LAST`;
 
-    const priceJoin = `LEFT JOIN LATERAL (
-         SELECT tp.tcgplayer_product_id, pr.market_price
+    const cardPriceJoin = `LEFT JOIN LATERAL (
+         SELECT tp.tcgplayer_url, pr.market_price, pr.low_price, pr.mid_price, pr.high_price
          FROM card_images ci2
-         JOIN tcgplayer_products tp ON tp.card_image_id = ci2.id
          LEFT JOIN LATERAL (
-           SELECT market_price FROM tcgplayer_prices
+           SELECT tp2.tcgplayer_product_id, tp2.tcgplayer_url, tp2.sub_type
+           FROM tcgplayer_products tp2
+           WHERE tp2.card_image_id = ci2.id
+           ORDER BY ${tcgplayerProductOrderSql("tp2")}
+           LIMIT 1
+         ) tp ON true
+         LEFT JOIN LATERAL (
+           SELECT market_price, low_price, mid_price, high_price
+           FROM tcgplayer_prices
            WHERE tcgplayer_product_id = tp.tcgplayer_product_id
              AND sub_type IS NOT DISTINCT FROM tp.sub_type
            ORDER BY fetched_at DESC LIMIT 1
          ) pr ON true
-         WHERE ci2.card_id = c.id AND ci2.is_default = true
+         WHERE ci2.card_id = c.id AND ci2.classified = true
+         ORDER BY ci2.is_default DESC, ${labelOrderSql("ci2")}, ci2.variant_index
+         LIMIT 1
+       ) latest_price ON true`;
+
+    const variantPriceJoin = `LEFT JOIN LATERAL (
+         SELECT tp.tcgplayer_url, pr.market_price, pr.low_price, pr.mid_price, pr.high_price
+         FROM tcgplayer_products tp
+         LEFT JOIN LATERAL (
+           SELECT market_price, low_price, mid_price, high_price
+           FROM tcgplayer_prices
+           WHERE tcgplayer_product_id = tp.tcgplayer_product_id
+             AND sub_type IS NOT DISTINCT FROM tp.sub_type
+           ORDER BY fetched_at DESC LIMIT 1
+         ) pr ON true
+         WHERE tp.card_image_id = ci.id
+         ORDER BY ${tcgplayerProductOrderSql("tp")}
          LIMIT 1
        ) latest_price ON true`;
 
@@ -254,16 +293,30 @@ export async function cardsRoutes(app: FastifyInstance) {
            WHERE ${where}`,
           filterParams,
         ),
-        query<CardRow & { image_url: string | null; label: string | null; variant_index: number; variant_product_name: string | null }>(
+        query<CardRow & {
+          image_url: string | null;
+          scan_url: string | null;
+          scan_thumb_url: string | null;
+          tcgplayer_url: string | null;
+          market_price: string | null;
+          low_price: string | null;
+          mid_price: string | null;
+          high_price: string | null;
+          label: string | null;
+          variant_index: number;
+          variant_product_name: string | null;
+        }>(
           `SELECT c.*, p.name AS product_name, p.released_at,
-                  ci.image_url, ci.label, ci.variant_index,
+                  ci.image_url, ci.scan_url, ci.scan_thumb_url,
+                  latest_price.tcgplayer_url, latest_price.market_price, latest_price.low_price, latest_price.mid_price, latest_price.high_price,
+                  ci.label, ci.variant_index,
                   ci.artist,
                   ip.name AS variant_product_name
            FROM cards c
            JOIN products p ON p.id = c.product_id
            JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true
            LEFT JOIN products ip ON ip.id = ci.product_id
-           ${needsPriceJoin ? priceJoin : ""}
+           ${variantPriceJoin}
            WHERE ${where}
            ORDER BY ${primaryOrderSql}, c.card_number ASC, ci.variant_index ASC
            LIMIT $${rowParamIdx} OFFSET $${rowParamIdx + 1}`,
@@ -293,12 +346,24 @@ export async function cardsRoutes(app: FastifyInstance) {
          WHERE ${where}`,
         filterParams,
       ),
-      query<CardRow & { image_url: string | null }>(
+      query<CardRow & {
+        image_url: string | null;
+        scan_url: string | null;
+        scan_thumb_url: string | null;
+        tcgplayer_url: string | null;
+        market_price: string | null;
+        low_price: string | null;
+        mid_price: string | null;
+        high_price: string | null;
+      }>(
         `SELECT c.*, p.name AS product_name, p.released_at,
-                ${bestImageSubquery("c.id")} AS image_url
+                ${bestImageSubquery("c.id")} AS image_url,
+                ${bestScanUrlSubquery("c.id")} AS scan_url,
+                ${bestScanThumbSubquery("c.id")} AS scan_thumb_url,
+                latest_price.tcgplayer_url, latest_price.market_price, latest_price.low_price, latest_price.mid_price, latest_price.high_price
          FROM cards c
          JOIN products p ON p.id = c.product_id
-         ${needsPriceJoin ? priceJoin : ""}
+         ${cardPriceJoin}
          WHERE ${where}
          ORDER BY ${primaryOrderSql}, c.card_number ASC
          LIMIT $${rowParamIdx} OFFSET $${rowParamIdx + 1}`,
@@ -315,7 +380,7 @@ export async function cardsRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/cards/autocomplete
-  app.get("/cards/autocomplete", async (req, reply) => {
+  app.get("/cards/autocomplete", { schema: cardAutocompleteRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
     const q = qs.q || "";
     if (q.length < 2) {
@@ -373,7 +438,7 @@ export async function cardsRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/cards/:card_number
-  app.get("/cards/:card_number", async (req, reply) => {
+  app.get("/cards/:card_number", { schema: cardDetailRouteSchema }, async (req, reply) => {
     const { card_number } = req.params as { card_number: string };
     const qs = req.query as Record<string, string>;
     const lang = qs.lang || "en";
@@ -492,23 +557,27 @@ export async function cardsRoutes(app: FastifyInstance) {
     // Group classified images by variant, aggregate prices by sub_type
     const imageMap = new Map<number, {
       variant_index: number;
+      label: string | null;
+      is_default: boolean;
+      artist: string | null;
       image_url: string | null;
       scan_url: string | null;
       scan_thumb_url: string | null;
-      artist: string | null;
-      label: string | null;
-      is_default: boolean;
-      product_name: string | null;
-      product_set_code: string | null;
-      product_released_at: string | null;
-      tcgplayer_url: string | null;
-      prices: Record<string, {
-        market_price: string | null;
-        low_price: string | null;
-        mid_price: string | null;
-        high_price: string | null;
+      product: {
+        name: string | null;
+        set_code: string | null;
+        released_at: string | null;
+      };
+      market: {
         tcgplayer_url: string | null;
-      }>;
+        prices: Record<string, {
+          market_price: string | null;
+          low_price: string | null;
+          mid_price: string | null;
+          high_price: string | null;
+          tcgplayer_url: string | null;
+        }>;
+      };
     }>();
 
     for (const img of images.rows) {
@@ -517,26 +586,30 @@ export async function cardsRoutes(app: FastifyInstance) {
       if (!entry) {
         entry = {
           variant_index: img.variant_index,
+          label: img.label,
+          is_default: img.is_default,
+          artist: img.artist,
           image_url: img.image_url,
           scan_url: img.scan_url,
           scan_thumb_url: img.scan_thumb_url,
-          artist: img.artist,
-          label: img.label,
-          is_default: img.is_default,
-          product_name: img.product_name,
-          product_set_code: img.product_set_code,
-          product_released_at: img.product_released_at,
-          tcgplayer_url: img.canonical_tcgplayer_url,
-          prices: {},
+          product: {
+            name: img.product_name,
+            set_code: img.product_set_code,
+            released_at: img.product_released_at,
+          },
+          market: {
+            tcgplayer_url: img.canonical_tcgplayer_url,
+            prices: {},
+          },
         };
         imageMap.set(img.variant_index, entry);
       }
-      if (!entry.tcgplayer_url && img.canonical_tcgplayer_url) {
-        entry.tcgplayer_url = img.canonical_tcgplayer_url;
+      if (!entry.market.tcgplayer_url && img.canonical_tcgplayer_url) {
+        entry.market.tcgplayer_url = img.canonical_tcgplayer_url;
       }
       if (img.market_price !== null) {
         const key = img.sub_type || "Normal";
-        entry.prices[key] = {
+        entry.market.prices[key] = {
           market_price: img.market_price,
           low_price: img.low_price,
           mid_price: img.mid_price,
@@ -545,6 +618,32 @@ export async function cardsRoutes(app: FastifyInstance) {
         };
       }
     }
+
+    const variants = [...imageMap.values()].sort((a, b) => {
+      const dateA = a.product.released_at;
+      const dateB = b.product.released_at;
+      if (dateA && dateB && dateA !== dateB) return dateA < dateB ? -1 : 1;
+      if (dateA && !dateB) return -1;
+      if (!dateA && dateB) return 1;
+
+      const labelDiff = labelOrder(a.label) - labelOrder(b.label);
+      if (labelDiff !== 0) return labelDiff;
+
+      return a.variant_index - b.variant_index;
+    }).map((variant) => ({
+      variant_index: variant.variant_index,
+      label: variant.label,
+      is_default: variant.is_default,
+      artist: variant.artist,
+      product: variant.product,
+      media: {
+        image_url: variant.image_url,
+        thumbnail_url: thumbnailUrl(variant.image_url),
+        scan_url: variant.scan_url,
+        scan_thumbnail_url: variant.scan_thumb_url,
+      },
+      market: variant.market,
+    }));
 
     // Group bans by format
     const bansByFormat = new Map<string, typeof cardBans.rows>();
@@ -596,21 +695,7 @@ export async function cardsRoutes(app: FastifyInstance) {
       data: {
         ...formatCard(card),
         set_name: card.set_product_name ?? setName(card.true_set_code),
-        images: [...imageMap.values()].sort((a, b) => {
-          // Sort by label priority first so Standard always leads,
-          // then by product release date within the same label tier
-          const labelDiff = labelOrder(a.label) - labelOrder(b.label);
-          if (labelDiff !== 0) return labelDiff;
-          const dateA = a.product_released_at ?? "";
-          const dateB = b.product_released_at ?? "";
-          if (dateA !== dateB) return dateA < dateB ? -1 : 1;
-          return a.variant_index - b.variant_index;
-        }).map(({ is_default: _, product_released_at: __, scan_url, scan_thumb_url, ...rest }) => ({
-          ...rest,
-          thumbnail_url: thumbnailUrl(rest.image_url),
-          ...(scan_url ? { scan_url } : {}),
-          ...(scan_thumb_url ? { scan_thumb_url } : {}),
-        })),
+        variants,
         legality: legalityObj,
         available_languages: languages.rows.map((r) => r.language),
       },

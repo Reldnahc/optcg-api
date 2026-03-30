@@ -1,6 +1,7 @@
 import "dotenv/config";
 import Fastify from "fastify";
 import { closePool } from "optcg-db/db/client.js";
+import { installOpenApi } from "./apiDocs.js";
 import { healthRoute } from "./routes/health.js";
 import { cardsRoutes } from "./routes/cards.js";
 import { setsRoutes } from "./routes/sets.js";
@@ -8,6 +9,7 @@ import { randomRoute } from "./routes/random.js";
 import { formatsRoutes } from "./routes/formats.js";
 import { pricesRoute } from "./routes/prices.js";
 import { donRoutes } from "./routes/don.js";
+import { docsRoutes } from "./routes/docs.js";
 import { getAdminOrigin } from "./admin/config.js";
 import { adminAuthRoutes } from "./admin/auth.js";
 import { adminCardsRoutes } from "./admin/cards.js";
@@ -17,6 +19,7 @@ import { adminScansRoutes } from "./admin/scans.js";
 import { adminAuth } from "./middleware/adminAuth.js";
 
 const app = Fastify({ logger: true });
+installOpenApi(app);
 const adminOrigin = getAdminOrigin();
 const SLOW_REQUEST_MS = 1000;
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || "10000", 10);
@@ -84,6 +87,7 @@ app.addHook("onSend", async (req, reply) => {
 
 // Routes
 app.register(healthRoute);
+app.register(docsRoutes);
 app.register(cardsRoutes, { prefix: "/v1" });
 app.register(setsRoutes, { prefix: "/v1" });
 app.register(randomRoute, { prefix: "/v1" });

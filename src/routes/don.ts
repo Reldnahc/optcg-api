@@ -1,10 +1,11 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { thumbnailUrl } from "../format.js";
+import { donDetailRouteSchema, donListRouteSchema } from "../schemas/public.js";
 
 export async function donRoutes(app: FastifyInstance) {
   // GET /v1/don
-  app.get("/don", async (req, reply) => {
+  app.get("/don", { schema: donListRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
 
     const conditions: string[] = [];
@@ -57,7 +58,7 @@ export async function donRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/don/:id
-  app.get("/don/:id", async (req, reply) => {
+  app.get("/don/:id", { schema: donDetailRouteSchema }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     const row = await query<{

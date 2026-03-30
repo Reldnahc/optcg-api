@@ -1,9 +1,10 @@
 import { FastifyInstance } from "fastify";
 import { getAdminEmail } from "./config.js";
 import { signAdminToken, verifyAdminCredentials } from "./session.js";
+import { adminLoginRouteSchema } from "../schemas/admin.js";
 
 export async function adminAuthRoutes(app: FastifyInstance) {
-  app.post("/login", async (req, reply) => {
+  app.post("/login", { schema: adminLoginRouteSchema }, async (req, reply) => {
     const body = (req.body ?? {}) as { email?: unknown; password?: unknown };
 
     if (typeof body.email !== "string" || typeof body.password !== "string") {

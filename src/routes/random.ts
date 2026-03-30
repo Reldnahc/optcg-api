@@ -2,9 +2,10 @@ import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { formatCard, CardRow } from "../format.js";
 import { normalizeCardRarity } from "../rarity.js";
+import { randomRouteSchema } from "../schemas/public.js";
 
 export async function randomRoute(app: FastifyInstance) {
-  app.get("/random", async (req, reply) => {
+  app.get("/random", { schema: randomRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
     const lang = qs.lang || "en";
 

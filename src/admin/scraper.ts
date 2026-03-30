@@ -1,9 +1,16 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { hasRunningTask, runConfiguredTask } from "./tasks.js";
+import {
+  adminRunPricesRouteSchema,
+  adminScraperLogsRouteSchema,
+  adminScraperStatusRouteSchema,
+  adminStatsRouteSchema,
+  adminWatcherTopicsRouteSchema,
+} from "../schemas/admin.js";
 
 export async function adminScraperRoutes(app: FastifyInstance) {
-  app.get("/stats", async () => {
+  app.get("/stats", { schema: adminStatsRouteSchema }, async () => {
     const [totalCardsResult, totalVariantsResult, cardsByLanguageResult, recentErrorsResult] = await Promise.all([
       query<{ total: string }>(`SELECT COUNT(*) AS total FROM cards`),
       query<{ total: string }>(`SELECT COUNT(*) AS total FROM card_images`),
@@ -35,7 +42,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     };
   });
 
-  app.get("/scraper/status", async (req, reply) => {
+  app.get("/scraper/status", { schema: adminScraperStatusRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
     const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "50", 10)));
 
@@ -59,7 +66,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     return { data: rows.rows };
   });
 
-  app.get("/scraper/logs", async (req, reply) => {
+  app.get("/scraper/logs", { schema: adminScraperLogsRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
     const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "50", 10)));
 
@@ -83,7 +90,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     return { data: rows.rows };
   });
 
-  app.get("/watcher/topics", async (req, reply) => {
+  app.get("/watcher/topics", { schema: adminWatcherTopicsRouteSchema }, async (req, reply) => {
     const qs = req.query as Record<string, string>;
     const limit = Math.min(100, Math.max(1, parseInt(qs.limit || "50", 10)));
 
@@ -246,7 +253,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/prices/run", async (req, reply) => {
+  app.post("/prices/run", { schema: adminRunPricesRouteSchema }, async (req, reply) => {
     const body = (req.body ?? {}) as {
       wipe?: unknown;
       archive_date?: unknown;

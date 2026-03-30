@@ -1,6 +1,13 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { formatBlockIsLegalSql, resolveFormatBlockRotationInput } from "../formatLegality.js";
+import {
+  adminCreateFormatBanRouteSchema,
+  adminDeleteFormatBanRouteSchema,
+  adminFormatsListRouteSchema,
+  adminUpdateFormatBanRouteSchema,
+  adminUpsertFormatBlockRouteSchema,
+} from "../schemas/admin.js";
 
 type BanType = "banned" | "restricted" | "pair";
 
@@ -82,7 +89,7 @@ function parseBanInput(body: Record<string, unknown>) {
 }
 
 export async function adminFormatsRoutes(app: FastifyInstance) {
-  app.get("/formats", async (_req, reply) => {
+  app.get("/formats", { schema: adminFormatsListRouteSchema }, async (_req, reply) => {
     const [formats, blocks, bans] = await Promise.all([
       query<FormatRow>(
         `SELECT id, name, description, has_rotation
@@ -138,7 +145,7 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post("/formats/:name/bans", async (req, reply) => {
+  app.post("/formats/:name/bans", { schema: adminCreateFormatBanRouteSchema }, async (req, reply) => {
     const { name } = req.params as { name: string };
     const format = await getFormat(name);
     if (!format) {
@@ -210,7 +217,7 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
     return { data: { ok: true } };
   });
 
-  app.put("/formats/:name/bans/:id", async (req, reply) => {
+  app.put("/formats/:name/bans/:id", { schema: adminUpdateFormatBanRouteSchema }, async (req, reply) => {
     const { name, id } = req.params as { name: string; id: string };
     const format = await getFormat(name);
     if (!format) {
@@ -318,7 +325,7 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
     return { data: { ok: true } };
   });
 
-  app.delete("/formats/:name/bans/:id", async (req, reply) => {
+  app.delete("/formats/:name/bans/:id", { schema: adminDeleteFormatBanRouteSchema }, async (req, reply) => {
     const { name, id } = req.params as { name: string; id: string };
     const format = await getFormat(name);
     if (!format) {
@@ -358,7 +365,7 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
     return { data: { ok: true } };
   });
 
-  app.post("/formats/:name/blocks", async (req, reply) => {
+  app.post("/formats/:name/blocks", { schema: adminUpsertFormatBlockRouteSchema }, async (req, reply) => {
     const { name } = req.params as { name: string };
     const format = await getFormat(name);
     if (!format) {

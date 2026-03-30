@@ -35,6 +35,20 @@ export function bestImageSubquery(cardIdExpr: string): string {
     ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
 }
 
+/** SQL subquery to get the best scan_url for a card using the same best-variant ordering. */
+export function bestScanUrlSubquery(cardIdExpr: string): string {
+  return `(SELECT ci.scan_url FROM card_images ci
+    WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
+    ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
+}
+
+/** SQL subquery to get the best scan thumbnail url for a card using the same best-variant ordering. */
+export function bestScanThumbSubquery(cardIdExpr: string): string {
+  return `(SELECT ci.scan_thumb_url FROM card_images ci
+    WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
+    ORDER BY ci.is_default DESC, ${labelOrderSql("ci")}, ci.variant_index LIMIT 1)`;
+}
+
 /** SQL subquery to get the most relevant non-null artist for a card. */
 export function bestArtistSubquery(cardIdExpr: string): string {
   return `(SELECT ci.artist FROM card_images ci
@@ -109,7 +123,16 @@ export interface CardRow {
 }
 
 /** Format a card row for API response */
-export function formatCard(row: CardRow & { image_url?: string | null }) {
+export function formatCard(row: CardRow & {
+  image_url?: string | null;
+  scan_url?: string | null;
+  scan_thumb_url?: string | null;
+  tcgplayer_url?: string | null;
+  market_price?: string | null;
+  low_price?: string | null;
+  mid_price?: string | null;
+  high_price?: string | null;
+}) {
   const now = new Date();
   const released = row.released_at ? new Date(row.released_at) <= now : false;
 
@@ -137,6 +160,29 @@ export function formatCard(row: CardRow & { image_url?: string | null }) {
       ? {
           image_url: row.image_url,
           thumbnail_url: thumbnailUrl(row.image_url),
+        }
+      : {}),
+    ...(row.scan_url !== undefined
+      ? {
+          scan_url: row.scan_url,
+        }
+      : {}),
+    ...(row.scan_thumb_url !== undefined
+      ? {
+          scan_thumb_url: row.scan_thumb_url,
+        }
+      : {}),
+    ...(row.tcgplayer_url !== undefined
+      ? {
+          tcgplayer_url: row.tcgplayer_url,
+        }
+      : {}),
+    ...(row.market_price !== undefined
+      ? {
+          market_price: row.market_price,
+          low_price: row.low_price ?? null,
+          mid_price: row.mid_price ?? null,
+          high_price: row.high_price ?? null,
         }
       : {}),
   };

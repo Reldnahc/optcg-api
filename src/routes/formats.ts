@@ -1,10 +1,11 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { formatBlockIsLegalSql } from "../formatLegality.js";
+import { formatDetailRouteSchema, formatsListRouteSchema } from "../schemas/public.js";
 
 export async function formatsRoutes(app: FastifyInstance) {
   // GET /v1/formats
-  app.get("/formats", async (_req, reply) => {
+  app.get("/formats", { schema: formatsListRouteSchema }, async (_req, reply) => {
     const rows = await query<{
       id: string;
       name: string;
@@ -35,7 +36,7 @@ export async function formatsRoutes(app: FastifyInstance) {
   });
 
   // GET /v1/formats/:format_name
-  app.get("/formats/:format_name", async (req, reply) => {
+  app.get("/formats/:format_name", { schema: formatDetailRouteSchema }, async (req, reply) => {
     const { format_name } = req.params as { format_name: string };
 
     const formatResult = await query<{

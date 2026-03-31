@@ -225,6 +225,61 @@ const scanProgressSchema = {
   },
 };
 
+const scanProgressMissingCardSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["card_number", "has_any_image_or_scan"],
+  properties: {
+    card_number: { type: "string" },
+    has_any_image_or_scan: { type: "boolean" },
+  },
+};
+
+const scanProgressMissingVariantSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["card_number", "variant_index", "label", "product_name", "product_set_code"],
+  properties: {
+    card_number: { type: "string" },
+    variant_index: { type: "integer" },
+    label: nullable({ type: "string" }),
+    product_name: nullable({ type: "string" }),
+    product_set_code: nullable({ type: "string" }),
+  },
+};
+
+const scanProgressMissingDetailSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "bucket_key",
+    "bucket_label",
+    "bucket_type",
+    "product_count",
+    "cards_missing_scan",
+    "variants_missing_scan",
+    "variants_without_image",
+  ],
+  properties: {
+    bucket_key: { type: "string" },
+    bucket_label: { type: "string" },
+    bucket_type: { type: "string", enum: ["set_product", "other_products"] },
+    product_count: { type: "integer" },
+    cards_missing_scan: {
+      type: "array",
+      items: scanProgressMissingCardSchema,
+    },
+    variants_missing_scan: {
+      type: "array",
+      items: scanProgressMissingVariantSchema,
+    },
+    variants_without_image: {
+      type: "array",
+      items: scanProgressMissingVariantSchema,
+    },
+  },
+};
+
 const cardSearchSortEnum = [
   "relevance",
   "name",
@@ -593,6 +648,25 @@ export const scanProgressRouteSchema = {
   response: {
     200: okEnvelopeSchema(scanProgressSchema),
     400: errorEnvelopeSchema,
+  },
+};
+
+export const scanProgressMissingRouteSchema = {
+  tags: ["Scans"],
+  summary: "Get missing scan details for a product bucket",
+  params: {
+    type: "object",
+    additionalProperties: false,
+    required: ["bucket_key"],
+    properties: {
+      bucket_key: { type: "string" },
+    },
+  },
+  querystring: languageQuerySchema,
+  response: {
+    200: okEnvelopeSchema(scanProgressMissingDetailSchema),
+    400: errorEnvelopeSchema,
+    404: errorEnvelopeSchema,
   },
 };
 

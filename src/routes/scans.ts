@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { scanProgressRouteSchema } from "../schemas/public.js";
+import { scanProgressMissingRouteSchema, scanProgressRouteSchema } from "../schemas/public.js";
 
 interface ScanProgressGroupRow {
   bucket_key: string;
@@ -22,6 +22,26 @@ interface ScanProgressOverallRow {
   total_variants: number;
   total_scanned_variants: number;
   total_variants_without_image: number;
+}
+
+interface ScanProgressBucketMetaRow {
+  bucket_key: string;
+  bucket_label: string;
+  bucket_type: "set_product" | "other_products";
+  product_count: number;
+}
+
+interface MissingScanCardRow {
+  card_number: string;
+  has_any_image_or_scan: boolean;
+}
+
+interface MissingScanVariantRow {
+  card_number: string;
+  variant_index: number;
+  label: string | null;
+  product_name: string | null;
+  product_set_code: string | null;
 }
 
 const PROGRESS_BUCKET_CTES = `
@@ -210,6 +230,94 @@ export async function scansRoutes(app: FastifyInstance) {
           scanned_variants: row.scanned_variants,
           variants_without_image: row.variants_without_image,
         })),
+      },
+    };
+  });
+
+  app.get("/scans/progress/missing/:bucket_key", { schema: scanProgressMissingRouteSchema }, async (req, reply) => {
+    const { bucket_key } = req.params as { bucket_key: string };
+    const qs = (req.query ?? {}) as { lang?: string };
+    const language = (qs.lang || "en").trim().toLowerCase();
+
+    if (!["en", "ja", "fr", "zh"].includes(language)) {
+      reply.code(400);
+      return { error: { status: 400, message: "language must be en, ja, fr, or zh" } };
+    }
+
+    const [bucketMetaResult, cardsMissingScanResult, variantsMissingScanResult, variantsWithoutImageResult] = await Promise.all([
+      query<ScanProgressBucketMetaRow>(`
+        ${PROGRESS_BUCKET_CTES}
+        SELECT
+          bucket_key,
+          bucket_label,
+          bucket_type::text AS bucket_type,
+          product_count
+        FROM bucket_product_counts
+        WHERE bucket_key = $2
+        LIMIT 1
+      `, [language, bucket_key]),
+      query<MissingScanCardRow>(`
+        ${PROGRESS_BUCKET_CTES}
+        SELECT
+          card_number,
+          has_any_image_or_scan
+        FROM card_bucket_summary
+        WHERE bucket_key = $2
+          AND NOT has_any_scan
+        ORDER BY card_number ASC
+      `, [language, bucket_key]),
+      query<MissingScanVariantRow>(`
+        ${PROGRESS_BUCKET_CTES}
+        SELECT
+          c.card_number,
+          ci.variant_index,
+          ci.label,
+          p.name AS product_name,
+          p.product_set_code
+        FROM cards c
+        JOIN card_images ci ON ci.card_id = c.id
+        LEFT JOIN products p ON p.id = ci.product_id
+        LEFT JOIN product_bucket_map pbm ON pbm.id = COALESCE(ci.product_id, c.product_id)
+        WHERE c.language = $1
+          AND COALESCE(pbm.bucket_key, '__other_products__') = $2
+          AND ci.scan_url IS NULL
+          AND ci.scan_source_s3_key IS NULL
+        ORDER BY c.card_number ASC, ci.variant_index ASC
+      `, [language, bucket_key]),
+      query<MissingScanVariantRow>(`
+        ${PROGRESS_BUCKET_CTES}
+        SELECT
+          c.card_number,
+          ci.variant_index,
+          ci.label,
+          p.name AS product_name,
+          p.product_set_code
+        FROM cards c
+        JOIN card_images ci ON ci.card_id = c.id
+        LEFT JOIN products p ON p.id = ci.product_id
+        LEFT JOIN product_bucket_map pbm ON pbm.id = COALESCE(ci.product_id, c.product_id)
+        WHERE c.language = $1
+          AND COALESCE(pbm.bucket_key, '__other_products__') = $2
+          AND ci.image_url IS NULL
+        ORDER BY c.card_number ASC, ci.variant_index ASC
+      `, [language, bucket_key]),
+    ]);
+
+    const bucketMeta = bucketMetaResult.rows[0];
+    if (!bucketMeta) {
+      reply.code(404);
+      return { error: { status: 404, message: "Scan progress bucket not found" } };
+    }
+
+    return {
+      data: {
+        bucket_key: bucketMeta.bucket_key,
+        bucket_label: bucketMeta.bucket_label,
+        bucket_type: bucketMeta.bucket_type,
+        product_count: bucketMeta.product_count,
+        cards_missing_scan: cardsMissingScanResult.rows,
+        variants_missing_scan: variantsMissingScanResult.rows,
+        variants_without_image: variantsWithoutImageResult.rows,
       },
     };
   });

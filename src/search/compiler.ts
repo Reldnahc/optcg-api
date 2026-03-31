@@ -7,20 +7,12 @@ import { requireCardRarity } from "../rarity.js";
 import { artistFilterSql, normalizedArtistFilterSql } from "../artist.js";
 import { formatBlockIsLegalSql } from "../formatLegality.js";
 import { variantDisplayOrderSql } from "../format.js";
+import { normalizeColorFilter, toPgTextArrayLiteral } from "../colors.js";
 
 export interface CompiledSearch {
   sql: string;
   params: unknown[];
 }
-
-const COLOR_MAP: Record<string, string> = {
-  red: "Red",
-  green: "Green",
-  blue: "Blue",
-  purple: "Purple",
-  black: "Black",
-  yellow: "Yellow",
-};
 
 const RARITY_MAP: Record<string, string> = {
   l: "L",
@@ -232,17 +224,16 @@ function compileFilter(
       return compileCardNameFilter(op, value, negated, ctx);
 
     case "color": {
-      const colors = value
-        .split(",")
-        .map((c) => COLOR_MAP[c.trim().toLowerCase()])
-        .filter(Boolean);
+      const colors = normalizeColorFilter(value);
       if (colors.length === 0) throw new Error(`Unknown color: ${value}`);
-      const p = param(ctx, `{${colors.join(",")}}`);
+      const p = param(ctx, toPgTextArrayLiteral(colors));
 
       let sql: string;
       if (op === "=" || op === ":") {
-        // c:red = has red; c=red = exactly red
-        sql = op === "=" ? `c.color = ${p}::text[]` : `c.color @> ${p}::text[]`;
+        // c:red = has red; c:red,yellow = has red OR yellow; c=red,yellow = exactly red/yellow, order-insensitive
+        sql = op === "="
+          ? `(c.color @> ${p}::text[] AND ${p}::text[] @> c.color)`
+          : `c.color && ${p}::text[]`;
       } else if (op === ">=") {
         sql = `c.color @> ${p}::text[]`;
       } else if (op === "<=") {

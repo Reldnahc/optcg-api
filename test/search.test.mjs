@@ -127,6 +127,22 @@ const tests = [
     },
   },
   {
+    name: "compiler treats comma-separated color filters as OR matches",
+    fn: () => {
+      const compiled = compileSearch(parseSearch("c:red,yellow"), 1, "cards");
+      assert.match(compiled.sql, /c\.color && \$1::text\[\]/);
+      assert.deepEqual(compiled.params, ["{Red,Yellow}"]);
+    },
+  },
+  {
+    name: "compiler treats exact multicolor filters as order-insensitive",
+    fn: () => {
+      const compiled = compileSearch(parseSearch("c=yellow,red"), 1, "cards");
+      assert.match(compiled.sql, /\(c\.color @> \$1::text\[\] AND \$1::text\[\] @> c\.color\)/);
+      assert.deepEqual(compiled.params, ["{Yellow,Red}"]);
+    },
+  },
+  {
     name: "compiler derives legal format filtering from rotated_at",
     fn: () => {
       const compiled = compileSearch(parseSearch("legal:standard"), 1, "cards");
@@ -209,6 +225,106 @@ const tests = [
           order_applied: "asc",
           relevance_active: false,
         });
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route treats comma-separated color query params as OR matches",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.color && \$2::text\[\]/);
+            assert.equal(params[1], "{Red,Yellow}");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.color && \$2::text\[\]/);
+            assert.equal(params[1], "{Red,Yellow}");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP07-999",
+                name: "Dual Threat",
+                color: ["Red", "Yellow"],
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            color: "red,yellow",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP07-999");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route treats exact multicolor filters as order-insensitive",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /\(c\.color @> \$2::text\[\] AND \$2::text\[\] @> c\.color\)/);
+            assert.equal(params[1], "{Yellow,Red}");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /\(c\.color @> \$2::text\[\] AND \$2::text\[\] @> c\.color\)/);
+            assert.equal(params[1], "{Yellow,Red}");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP08-888",
+                name: "Same Colors Either Way",
+                color: ["Red", "Yellow"],
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "c=yellow,red",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP08-888");
         assertDone();
       } finally {
         await app.close();

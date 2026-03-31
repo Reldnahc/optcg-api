@@ -5,6 +5,7 @@ import { compileSearch } from "../search/compiler.js";
 import { CARD_RARITY_ORDER_SQL, normalizeCardRarity } from "../rarity.js";
 import { artistFilterSql, artistSortSql } from "../artist.js";
 import { formatBlockIsLegalSql } from "../formatLegality.js";
+import { normalizeColorFilter, toPgTextArrayLiteral } from "../colors.js";
 import {
   cardAutocompleteRouteSchema,
   cardDetailRouteSchema,
@@ -123,8 +124,13 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       paramIdx++;
     }
     if (qs.color) {
-      conditions.push(`c.color @> $${paramIdx}::text[]`);
-      params.push(`{${qs.color.split(",").map((c) => c.trim().charAt(0).toUpperCase() + c.trim().slice(1).toLowerCase()).join(",")}}`);
+      const colors = normalizeColorFilter(qs.color);
+      if (colors.length === 0) {
+        reply.code(400);
+        return { error: { status: 400, message: `Invalid color: ${qs.color}` } };
+      }
+      conditions.push(`c.color && $${paramIdx}::text[]`);
+      params.push(toPgTextArrayLiteral(colors));
       paramIdx++;
     }
     if (qs.type) {

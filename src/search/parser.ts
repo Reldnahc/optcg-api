@@ -7,6 +7,7 @@
  *   name:"Luffy"       → card name contains phrase
  *   name="Luffy"       → exact card name match
  *   c:red              → color includes red
+ *   c:red,yellow       → color includes red or yellow
  *   c=red              → color exactly red
  *   cost>=5            → cost >= 5
  *   t:leader           → type = leader

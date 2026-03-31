@@ -34,9 +34,9 @@ function serializeBan(row: FormatBanRow) {
   return {
     id: row.id,
     card_number: row.card_number,
-    type: row.ban_type,
+    ban_type: row.ban_type,
     ...(row.max_copies != null ? { max_copies: row.max_copies } : {}),
-    ...(row.paired_card_number ? { paired_with: row.paired_card_number } : {}),
+    ...(row.paired_card_number ? { paired_card_number: row.paired_card_number } : {}),
     banned_at: row.banned_at,
     ...(row.reason ? { reason: row.reason } : {}),
     ...(row.unbanned_at ? { unbanned_at: row.unbanned_at } : {}),

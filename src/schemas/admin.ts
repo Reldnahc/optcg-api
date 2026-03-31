@@ -22,13 +22,13 @@ const adminFormatBlockSchema = {
 const adminFormatBanSchema = {
   type: "object",
   additionalProperties: true,
-  required: ["id", "card_number", "type", "banned_at"],
+  required: ["id", "card_number", "ban_type", "banned_at"],
   properties: {
     id: { type: "string" },
     card_number: { type: "string" },
-    type: { type: "string" },
+    ban_type: { type: "string" },
     max_copies: { type: "integer" },
-    paired_with: { type: "string" },
+    paired_card_number: { type: "string" },
     banned_at: { type: "string", format: "date-time" },
     reason: { type: "string" },
     unbanned_at: { type: "string", format: "date-time" },

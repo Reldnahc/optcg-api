@@ -946,15 +946,21 @@ export async function adminScansRoutes(app: FastifyInstance) {
     }
 
     const existing = existingResult.rows[0];
-    const cardNumber = typeof body.card_number === "string"
-      ? (body.card_number.trim().toUpperCase() || null)
-      : undefined;
-    const artist = typeof body.artist === "string"
-      ? (body.artist.trim() || null)
-      : undefined;
-    const reviewNotes = typeof body.review_notes === "string"
-      ? (body.review_notes.trim() || null)
-      : undefined;
+    const cardNumber = body.card_number === null
+      ? null
+      : typeof body.card_number === "string"
+        ? (body.card_number.trim().toUpperCase() || null)
+        : undefined;
+    const artist = body.artist === null
+      ? null
+      : typeof body.artist === "string"
+        ? (body.artist.trim() || null)
+        : undefined;
+    const reviewNotes = body.review_notes === null
+      ? null
+      : typeof body.review_notes === "string"
+        ? (body.review_notes.trim() || null)
+        : undefined;
     const nextCardNumber = cardNumber !== undefined ? cardNumber : existing.card_number;
     const nextArtist = artist !== undefined ? artist : existing.artist;
     const nextReviewNotes = reviewNotes !== undefined ? reviewNotes : existing.review_notes;

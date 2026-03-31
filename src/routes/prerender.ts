@@ -111,6 +111,7 @@ interface SetProductRow {
   name: string;
   set_codes: string[] | null;
   released_at: string | null;
+  code_count: number | null;
 }
 
 interface FormatSummaryRow {
@@ -467,11 +468,12 @@ export async function prerenderRoutes(app: FastifyInstance) {
          ORDER BY c.true_set_code ASC, c.card_number ASC`,
       ),
       query<SetProductRow>(
-        `SELECT DISTINCT set_codes.set_code, p.name, p.set_codes, p.released_at
+        `SELECT DISTINCT set_codes.set_code, p.name, p.set_codes, p.released_at,
+                         COALESCE(array_length(p.set_codes, 1), 0) AS code_count
          FROM products p
          JOIN LATERAL unnest(p.set_codes) WITH ORDINALITY AS set_codes(set_code, position) ON true
          WHERE p.language = 'en'
-         ORDER BY set_codes.set_code ASC, COALESCE(array_length(p.set_codes, 1), 0) ASC, p.released_at ASC NULLS LAST, p.name ASC`,
+         ORDER BY set_codes.set_code ASC, code_count ASC, p.released_at ASC NULLS LAST, p.name ASC`,
       ),
       query<FormatSummaryRow>(
         `SELECT f.id, f.name, f.description, f.has_rotation,

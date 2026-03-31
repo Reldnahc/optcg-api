@@ -986,18 +986,18 @@ export async function adminScansRoutes(app: FastifyInstance) {
       status: ItemStatus;
     }>(
       `UPDATE scan_ingest_items
-       SET card_number = $2,
-           artist = $3,
-           review_notes = $4,
-           fuzzy_artist = $5,
-           fuzzy_artist_score = $6,
+       SET card_number = $2::text,
+           artist = $3::text,
+           review_notes = $4::text,
+           fuzzy_artist = $5::text,
+           fuzzy_artist_score = $6::numeric,
            fuzzy_artist_matched = $7,
            suggested_filename = CASE
-             WHEN $2 IS NULL THEN suggested_filename
+             WHEN $2::text IS NULL THEN suggested_filename
              ELSE CONCAT(
-               $2,
+               $2::text,
                '_',
-               $8,
+               $8::text,
                CASE
                  WHEN duplicate_index > 0 THEN CONCAT('__', duplicate_index + 1)
                  ELSE ''

@@ -168,6 +168,38 @@ const cardPrintSummarySchema = {
   },
 };
 
+const scanProgressSetSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["set_code", "total_cards", "scanned_cards", "missing_image_cards", "total_variants", "scanned_variants"],
+  properties: {
+    set_code: { type: "string" },
+    total_cards: { type: "integer" },
+    scanned_cards: { type: "integer" },
+    missing_image_cards: { type: "integer" },
+    total_variants: { type: "integer" },
+    scanned_variants: { type: "integer" },
+  },
+};
+
+const scanProgressSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["language", "total_cards", "total_scanned_cards", "total_missing_image_cards", "total_variants", "total_scanned_variants", "sets"],
+  properties: {
+    language: { type: "string" },
+    total_cards: { type: "integer" },
+    total_scanned_cards: { type: "integer" },
+    total_missing_image_cards: { type: "integer" },
+    total_variants: { type: "integer" },
+    total_scanned_variants: { type: "integer" },
+    sets: {
+      type: "array",
+      items: scanProgressSetSchema,
+    },
+  },
+};
+
 const cardSearchSortEnum = [
   "relevance",
   "name",
@@ -526,6 +558,16 @@ export const cardDetailRouteSchema = {
   response: {
     200: okEnvelopeSchema(cardDetailSchema),
     404: errorEnvelopeSchema,
+  },
+};
+
+export const scanProgressRouteSchema = {
+  tags: ["Scans"],
+  summary: "Get scan progress by language",
+  querystring: languageQuerySchema,
+  response: {
+    200: okEnvelopeSchema(scanProgressSchema),
+    400: errorEnvelopeSchema,
   },
 };
 

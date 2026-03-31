@@ -1104,11 +1104,11 @@ export async function adminScansRoutes(app: FastifyInstance) {
            scan_derivative_requested_at = NOW(),
            scan_derivative_processed_at = NULL,
            artist = CASE
-             WHEN (artist IS NULL OR btrim(artist) = '') AND $4::text IS NOT NULL AND btrim($4::text) <> '' THEN $4::text
+             WHEN $4::text IS NOT NULL AND btrim($4::text) <> '' THEN $4::text
              ELSE artist
            END,
            artist_source = CASE
-             WHEN (artist IS NULL OR btrim(artist) = '') AND $4::text IS NOT NULL AND btrim($4::text) <> '' THEN 'manual'
+             WHEN $4::text IS NOT NULL AND btrim($4::text) <> '' THEN 'manual'
              ELSE artist_source
            END
        WHERE id = $1`,

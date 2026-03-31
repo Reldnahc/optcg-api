@@ -3,6 +3,7 @@ import { query } from "optcg-db/db/client.js";
 import { formatCard, CardRow } from "../format.js";
 import { normalizeCardRarity } from "../rarity.js";
 import { randomRouteSchema } from "../schemas/public.js";
+import { normalizeColorFilter, toPgTextArrayLiteral } from "../colors.js";
 
 export async function randomRoute(app: FastifyInstance) {
   app.get("/random", { schema: randomRouteSchema }, async (req, reply) => {
@@ -19,8 +20,13 @@ export async function randomRoute(app: FastifyInstance) {
       idx++;
     }
     if (qs.color) {
-      conditions.push(`c.color @> $${idx}::text[]`);
-      params.push(`{${qs.color.split(",").map((c) => c.trim().charAt(0).toUpperCase() + c.trim().slice(1).toLowerCase()).join(",")}}`);
+      const colors = normalizeColorFilter(qs.color);
+      if (colors.length === 0) {
+        reply.code(400);
+        return { error: { status: 400, message: `Invalid color: ${qs.color}` } };
+      }
+      conditions.push(`c.color && $${idx}::text[]`);
+      params.push(toPgTextArrayLiteral(colors));
       idx++;
     }
     if (qs.type) {

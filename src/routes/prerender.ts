@@ -148,12 +148,25 @@ interface DonRow {
 }
 
 interface ScanProgressRow {
-  set_code: string;
+  bucket_key: string;
+  bucket_label: string;
+  bucket_type: "set_product" | "other_products";
+  product_count: number;
   total_cards: number;
   scanned_cards: number;
-  missing_image_cards: number;
+  cards_without_image_or_scan: number;
   total_variants: number;
   scanned_variants: number;
+  variants_without_image: number;
+}
+
+interface ScanProgressOverallRow {
+  total_cards: number;
+  total_scanned_cards: number;
+  total_cards_without_image_or_scan: number;
+  total_variants: number;
+  total_scanned_variants: number;
+  total_variants_without_image: number;
 }
 
 function stableStringify(value: unknown): string {
@@ -325,6 +338,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
       formatBansResult,
       donResult,
       scansResult,
+      scansOverallResult,
     ] = await Promise.all([
       query<CardBaseRow>(
         `SELECT c.id, c.card_number, c.language, c.true_set_code, c.name, c.card_type, c.rarity, c.color,
@@ -487,31 +501,140 @@ export async function prerenderRoutes(app: FastifyInstance) {
          ORDER BY d.character ASC, p.name ASC, d.id ASC`,
       ),
       query<ScanProgressRow>(
+        `WITH known_set_codes AS (
+           SELECT DISTINCT true_set_code AS set_code
+           FROM cards
+           WHERE language = 'en'
+         ),
+         product_bucket_map AS (
+           SELECT
+             p.id,
+             CASE
+               WHEN p.product_set_code IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
+               THEN p.product_set_code
+               ELSE '__other_products__'
+             END AS bucket_key,
+             CASE
+               WHEN p.product_set_code IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
+               THEN p.product_set_code
+               ELSE 'Other Products'
+             END AS bucket_label,
+             CASE
+               WHEN p.product_set_code IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
+               THEN 'set_product'
+               ELSE 'other_products'
+             END AS bucket_type
+           FROM products p
+           WHERE p.language = 'en'
+         ),
+         bucket_product_counts AS (
+           SELECT
+             bucket_key,
+             MIN(bucket_label) AS bucket_label,
+             MIN(bucket_type) AS bucket_type,
+             COUNT(*)::int AS product_count
+           FROM product_bucket_map
+           GROUP BY bucket_key
+         ),
+         card_bucket_summary AS (
+           SELECT
+             COALESCE(pbm.bucket_key, '__other_products__') AS bucket_key,
+             c.card_number,
+             COUNT(ci.id)::int AS total_variants,
+             COUNT(*) FILTER (
+               WHERE ci.id IS NOT NULL
+                 AND (
+                   ci.scan_url IS NOT NULL
+                   OR ci.scan_source_s3_key IS NOT NULL
+                 )
+             )::int AS scanned_variants,
+             COUNT(*) FILTER (
+               WHERE ci.id IS NOT NULL
+                 AND ci.image_url IS NULL
+             )::int AS variants_without_image,
+             COALESCE(BOOL_OR(
+               CASE
+                 WHEN ci.id IS NOT NULL
+                 THEN ci.scan_url IS NOT NULL OR ci.scan_source_s3_key IS NOT NULL
+                 ELSE false
+               END
+             ), false) AS has_any_scan,
+             COALESCE(BOOL_OR(
+               CASE
+                 WHEN ci.id IS NOT NULL
+                 THEN ci.image_url IS NOT NULL OR ci.scan_url IS NOT NULL OR ci.scan_source_s3_key IS NOT NULL
+                 ELSE false
+               END
+             ), false) AS has_any_image_or_scan
+           FROM cards c
+           LEFT JOIN card_images ci ON ci.card_id = c.id
+           LEFT JOIN product_bucket_map pbm ON pbm.id = COALESCE(ci.product_id, c.product_id)
+           WHERE c.language = 'en'
+           GROUP BY COALESCE(pbm.bucket_key, '__other_products__'), c.card_number
+         )
+         SELECT
+           cbs.bucket_key,
+           COALESCE(bpc.bucket_label, 'Other Products') AS bucket_label,
+           COALESCE(bpc.bucket_type, 'other_products')::text AS bucket_type,
+           COALESCE(bpc.product_count, 0)::int AS product_count,
+           COUNT(*)::int AS total_cards,
+           COUNT(*) FILTER (WHERE cbs.has_any_scan)::int AS scanned_cards,
+           COUNT(*) FILTER (WHERE NOT cbs.has_any_image_or_scan)::int AS cards_without_image_or_scan,
+           COALESCE(SUM(cbs.total_variants), 0)::int AS total_variants,
+           COALESCE(SUM(cbs.scanned_variants), 0)::int AS scanned_variants,
+           COALESCE(SUM(cbs.variants_without_image), 0)::int AS variants_without_image
+         FROM card_bucket_summary cbs
+         LEFT JOIN bucket_product_counts bpc ON bpc.bucket_key = cbs.bucket_key
+         GROUP BY cbs.bucket_key, bpc.bucket_label, bpc.bucket_type, bpc.product_count
+         ORDER BY
+           CASE WHEN cbs.bucket_key = '__other_products__' THEN 1 ELSE 0 END,
+           cbs.bucket_key ASC`,
+      ),
+      query<ScanProgressOverallRow>(
         `SELECT
-           c.true_set_code AS set_code,
-           COUNT(DISTINCT c.id)::int AS total_cards,
-           COUNT(DISTINCT CASE
-             WHEN ci.scan_url IS NOT NULL
-               OR ci.scan_source_s3_key IS NOT NULL
-             THEN c.id
-           END)::int AS scanned_cards,
-           COUNT(DISTINCT CASE
-             WHEN ci.image_url IS NULL
-               AND ci.scan_url IS NULL
-               AND ci.scan_source_s3_key IS NULL
-             THEN c.id
-           END)::int AS missing_image_cards,
-           COUNT(ci.id)::int AS total_variants,
-           COUNT(CASE
-             WHEN ci.scan_url IS NOT NULL
-               OR ci.scan_source_s3_key IS NOT NULL
-             THEN 1
-           END)::int AS scanned_variants
-         FROM cards c
-         LEFT JOIN card_images ci ON ci.card_id = c.id
-         WHERE c.language = 'en'
-         GROUP BY c.true_set_code
-         ORDER BY c.true_set_code ASC`,
+           COUNT(*)::int AS total_cards,
+           COUNT(*) FILTER (WHERE has_any_scan)::int AS total_scanned_cards,
+           COUNT(*) FILTER (WHERE NOT has_any_image_or_scan)::int AS total_cards_without_image_or_scan,
+           COALESCE(SUM(total_variants), 0)::int AS total_variants,
+           COALESCE(SUM(scanned_variants), 0)::int AS total_scanned_variants,
+           COALESCE(SUM(variants_without_image), 0)::int AS total_variants_without_image
+         FROM (
+           SELECT
+             c.card_number,
+             COUNT(ci.id)::int AS total_variants,
+             COUNT(*) FILTER (
+               WHERE ci.id IS NOT NULL
+                 AND (
+                   ci.scan_url IS NOT NULL
+                   OR ci.scan_source_s3_key IS NOT NULL
+                 )
+             )::int AS scanned_variants,
+             COUNT(*) FILTER (
+               WHERE ci.id IS NOT NULL
+                 AND ci.image_url IS NULL
+             )::int AS variants_without_image,
+             COALESCE(BOOL_OR(
+               CASE
+                 WHEN ci.id IS NOT NULL
+                 THEN ci.scan_url IS NOT NULL OR ci.scan_source_s3_key IS NOT NULL
+                 ELSE false
+               END
+             ), false) AS has_any_scan,
+             COALESCE(BOOL_OR(
+               CASE
+                 WHEN ci.id IS NOT NULL
+                 THEN ci.image_url IS NOT NULL OR ci.scan_url IS NOT NULL OR ci.scan_source_s3_key IS NOT NULL
+                 ELSE false
+               END
+             ), false) AS has_any_image_or_scan
+           FROM cards c
+           LEFT JOIN card_images ci ON ci.card_id = c.id
+           WHERE c.language = 'en'
+           GROUP BY c.card_number
+         ) overall_card_summary`,
       ),
     ]);
 
@@ -645,19 +768,34 @@ export async function prerenderRoutes(app: FastifyInstance) {
       }))),
     });
 
+    const scansOverall = scansOverallResult.rows[0] ?? {
+      total_cards: 0,
+      total_scanned_cards: 0,
+      total_cards_without_image_or_scan: 0,
+      total_variants: 0,
+      total_scanned_variants: 0,
+      total_variants_without_image: 0,
+    };
+
     const scansPayload = {
-      total_cards: scansResult.rows.reduce((sum, row) => sum + row.total_cards, 0),
-      total_scanned_cards: scansResult.rows.reduce((sum, row) => sum + row.scanned_cards, 0),
-      total_missing_image_cards: scansResult.rows.reduce((sum, row) => sum + row.missing_image_cards, 0),
-      total_variants: scansResult.rows.reduce((sum, row) => sum + row.total_variants, 0),
-      total_scanned_variants: scansResult.rows.reduce((sum, row) => sum + row.scanned_variants, 0),
-      sets: scansResult.rows.map((row) => ({
-        set_code: row.set_code,
+      language: "en",
+      total_cards: scansOverall.total_cards,
+      total_scanned_cards: scansOverall.total_scanned_cards,
+      total_cards_without_image_or_scan: scansOverall.total_cards_without_image_or_scan,
+      total_variants: scansOverall.total_variants,
+      total_scanned_variants: scansOverall.total_scanned_variants,
+      total_variants_without_image: scansOverall.total_variants_without_image,
+      groups: scansResult.rows.map((row) => ({
+        bucket_key: row.bucket_key,
+        bucket_label: row.bucket_label,
+        bucket_type: row.bucket_type,
+        product_count: row.product_count,
         total_cards: row.total_cards,
         scanned_cards: row.scanned_cards,
-        missing_image_cards: row.missing_image_cards,
+        cards_without_image_or_scan: row.cards_without_image_or_scan,
         total_variants: row.total_variants,
         scanned_variants: row.scanned_variants,
+        variants_without_image: row.variants_without_image,
       })),
     };
 

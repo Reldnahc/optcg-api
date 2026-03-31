@@ -168,34 +168,59 @@ const cardPrintSummarySchema = {
   },
 };
 
-const scanProgressSetSchema = {
+const scanProgressGroupSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["set_code", "total_cards", "scanned_cards", "missing_image_cards", "total_variants", "scanned_variants"],
+  required: [
+    "bucket_key",
+    "bucket_label",
+    "bucket_type",
+    "product_count",
+    "total_cards",
+    "scanned_cards",
+    "cards_without_image_or_scan",
+    "total_variants",
+    "scanned_variants",
+    "variants_without_image",
+  ],
   properties: {
-    set_code: { type: "string" },
+    bucket_key: { type: "string" },
+    bucket_label: { type: "string" },
+    bucket_type: { type: "string", enum: ["set_product", "other_products"] },
+    product_count: { type: "integer" },
     total_cards: { type: "integer" },
     scanned_cards: { type: "integer" },
-    missing_image_cards: { type: "integer" },
+    cards_without_image_or_scan: { type: "integer" },
     total_variants: { type: "integer" },
     scanned_variants: { type: "integer" },
+    variants_without_image: { type: "integer" },
   },
 };
 
 const scanProgressSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["language", "total_cards", "total_scanned_cards", "total_missing_image_cards", "total_variants", "total_scanned_variants", "sets"],
+  required: [
+    "language",
+    "total_cards",
+    "total_scanned_cards",
+    "total_cards_without_image_or_scan",
+    "total_variants",
+    "total_scanned_variants",
+    "total_variants_without_image",
+    "groups",
+  ],
   properties: {
     language: { type: "string" },
     total_cards: { type: "integer" },
     total_scanned_cards: { type: "integer" },
-    total_missing_image_cards: { type: "integer" },
+    total_cards_without_image_or_scan: { type: "integer" },
     total_variants: { type: "integer" },
     total_scanned_variants: { type: "integer" },
-    sets: {
+    total_variants_without_image: { type: "integer" },
+    groups: {
       type: "array",
-      items: scanProgressSetSchema,
+      items: scanProgressGroupSchema,
     },
   },
 };

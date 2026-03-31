@@ -10,6 +10,10 @@ function parseCsvEnv(name: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+export function getDiscordWebhookUrl(): string | null {
+  return process.env.DISCORD_WEBHOOK_URL || null;
+}
+
 export function getAdminOrigin(): string {
   return process.env.ADMIN_ORIGIN || "https://admin.poneglyph.one";
 }

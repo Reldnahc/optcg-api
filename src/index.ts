@@ -10,6 +10,7 @@ import { formatsRoutes } from "./routes/formats.js";
 import { pricesRoute } from "./routes/prices.js";
 import { donRoutes } from "./routes/don.js";
 import { docsRoutes } from "./routes/docs.js";
+import { reportRoute } from "./routes/report.js";
 import { getAdminOrigin } from "./admin/config.js";
 import { adminAuthRoutes } from "./admin/auth.js";
 import { adminCardsRoutes } from "./admin/cards.js";
@@ -75,14 +76,26 @@ app.addHook("onResponse", async (req, reply) => {
 });
 
 // CORS — open
+const WEB_ORIGIN = "https://poneglyph.one";
 app.addHook("onSend", async (req, reply) => {
   const origin = req.headers.origin;
-  const allowAdminMethods = !origin || origin === adminOrigin || LOCAL_ADMIN_ORIGIN_RE.test(origin);
+  const isAdmin = !origin || origin === adminOrigin || LOCAL_ADMIN_ORIGIN_RE.test(origin);
+  const isWeb = origin === WEB_ORIGIN;
 
   reply.header("Vary", "Origin");
-  reply.header("Access-Control-Allow-Origin", allowAdminMethods ? origin || "*" : "*");
-  reply.header("Access-Control-Allow-Methods", allowAdminMethods ? "GET, POST, PUT, DELETE, OPTIONS" : "GET, OPTIONS");
-  reply.header("Access-Control-Allow-Headers", allowAdminMethods ? "Content-Type, Authorization" : "Content-Type");
+  if (isAdmin) {
+    reply.header("Access-Control-Allow-Origin", origin || "*");
+    reply.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  } else if (isWeb) {
+    reply.header("Access-Control-Allow-Origin", origin);
+    reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    reply.header("Access-Control-Allow-Headers", "Content-Type");
+  } else {
+    reply.header("Access-Control-Allow-Origin", "*");
+    reply.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    reply.header("Access-Control-Allow-Headers", "Content-Type");
+  }
 });
 
 // Routes
@@ -94,6 +107,7 @@ app.register(randomRoute, { prefix: "/v1" });
 app.register(formatsRoutes, { prefix: "/v1" });
 app.register(pricesRoute, { prefix: "/v1" });
 app.register(donRoutes, { prefix: "/v1" });
+app.register(reportRoute, { prefix: "/v1" });
 app.register(adminAuthRoutes, { prefix: "/admin" });
 app.register(async (adminApp) => {
   adminApp.register(async (protectedAdminApp) => {

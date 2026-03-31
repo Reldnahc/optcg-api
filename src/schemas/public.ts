@@ -528,3 +528,36 @@ export const cardDetailRouteSchema = {
     404: errorEnvelopeSchema,
   },
 };
+
+const prerenderManifestRouteEntrySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["route", "render_group", "data_hash"],
+  properties: {
+    route: { type: "string" },
+    render_group: {
+      type: "string",
+      enum: ["cards", "sets_index", "set_detail", "formats_index", "format_detail", "don", "scan_progress"],
+    },
+    data_hash: { type: "string" },
+  },
+};
+
+export const prerenderManifestRouteSchema = {
+  tags: ["System"],
+  summary: "Get prerender route fingerprints",
+  response: {
+    200: okEnvelopeSchema({
+      type: "object",
+      additionalProperties: false,
+      required: ["generated_at", "routes"],
+      properties: {
+        generated_at: { type: "string", format: "date-time" },
+        routes: {
+          type: "array",
+          items: prerenderManifestRouteEntrySchema,
+        },
+      },
+    }),
+  },
+};

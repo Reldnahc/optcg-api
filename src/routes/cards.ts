@@ -9,6 +9,7 @@ import { normalizeColorFilter, toPgTextArrayLiteral } from "../colors.js";
 import {
   cardAutocompleteRouteSchema,
   cardDetailRouteSchema,
+  cardPlainTextRouteSchema,
   cardsSearchRouteSchema,
 } from "../schemas/public.js";
 
@@ -27,6 +28,7 @@ function extractInlineSort(node: SearchNode): { order?: string; direction?: stri
 }
 import {
   formatCard,
+  formatCardPlainText,
   CardRow,
   compareVariantDisplayOrder,
   labelOrder,
@@ -562,6 +564,30 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
 
     reply.header("Cache-Control", "public, max-age=3600");
     return { data: rows.rows.map((r: { name: string }) => r.name) };
+  });
+
+  app.get("/cards/:card_number/text", { schema: cardPlainTextRouteSchema }, async (req, reply) => {
+    const { card_number } = req.params as { card_number: string };
+    const qs = req.query as Record<string, string>;
+    const lang = qs.lang || "en";
+
+    const cardResult = await runQuery<CardRow>(
+      `SELECT c.*, p.name AS product_name, p.released_at
+       FROM cards c
+       JOIN products p ON p.id = c.product_id
+       WHERE c.card_number ILIKE $1 AND c.language = $2
+       LIMIT 1`,
+      [card_number, lang],
+    );
+
+    if (cardResult.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    reply.type("text/plain; charset=utf-8");
+    reply.header("Cache-Control", "public, max-age=86400");
+    return formatCardPlainText(cardResult.rows[0]);
   });
 
   // GET /v1/cards/:card_number

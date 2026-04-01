@@ -222,3 +222,54 @@ export function formatCard(row: CardRow & {
       : {}),
   };
 }
+
+function normalizeTextBlock(value: string | null): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function formatCardHeadline(row: CardRow): string {
+  return [
+    row.color.join("/"),
+    row.card_type,
+    row.card_number,
+    row.rarity,
+  ].filter((part): part is string => Boolean(part && part.trim())).join(" ");
+}
+
+function formatCardStats(row: CardRow): string | null {
+  const parts: string[] = [];
+  if (row.cost != null) parts.push(`${row.cost} Cost`);
+  if (row.life != null) parts.push(`${row.life} Life`);
+  if (row.power != null) parts.push(`${row.power} Power`);
+
+  const attribute = row.attribute?.filter(Boolean).join("/") || "";
+  const stats = parts.join(" / ");
+  if (stats && attribute) return `${stats} (${attribute})`;
+  if (stats) return stats;
+  if (attribute) return `(${attribute})`;
+  return null;
+}
+
+export function formatCardPlainText(row: CardRow): string {
+  const lines = [
+    row.name,
+    formatCardHeadline(row),
+    formatCardStats(row),
+    row.types.join("/ "),
+    row.counter != null ? `Counter +${row.counter}` : null,
+  ].filter((line): line is string => Boolean(line && line.trim()));
+
+  const effect = normalizeTextBlock(row.effect);
+  const triggerBody = normalizeTextBlock(row.trigger);
+  const trigger = triggerBody
+    ? (triggerBody.startsWith("[Trigger]") ? triggerBody : `[Trigger] ${triggerBody}`)
+    : null;
+  const textBlocks = [effect, trigger].filter((block): block is string => Boolean(block));
+
+  if (textBlocks.length === 0) {
+    return lines.join("\n");
+  }
+
+  return `${lines.join("\n")}\n\n${textBlocks.join("\n\n")}`;
+}

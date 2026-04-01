@@ -641,6 +641,17 @@ export const cardDetailRouteSchema = {
   },
 };
 
+export const cardPlainTextRouteSchema = {
+  tags: ["Cards"],
+  summary: "Get plain-text card text",
+  params: cardNumberParamSchema,
+  querystring: languageQuerySchema,
+  response: {
+    200: { type: "string" },
+    404: errorEnvelopeSchema,
+  },
+};
+
 export const scanProgressRouteSchema = {
   tags: ["Scans"],
   summary: "Get scan progress by language",

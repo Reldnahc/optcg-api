@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { labelOrder, thumbnailUrl, setName } from "../format.js";
+import { compareVariantDisplayOrder, thumbnailUrl, setName } from "../format.js";
 import { formatBlockAllowedSql } from "../formatLegality.js";
 import { prerenderManifestRouteSchema } from "../schemas/public.js";
 
@@ -216,18 +216,20 @@ function cardRoutePayload(
 
   const classifiedVariants = variants
     .filter((variant) => variant.classified)
-    .sort((a, b) => {
-      const dateA = a.product_released_at;
-      const dateB = b.product_released_at;
-      if (dateA && dateB && dateA !== dateB) return dateA < dateB ? -1 : 1;
-      if (dateA && !dateB) return -1;
-      if (!dateA && dateB) return 1;
-
-      const labelDiff = labelOrder(a.label) - labelOrder(b.label);
-      if (labelDiff !== 0) return labelDiff;
-
-      return a.variant_index - b.variant_index;
-    })
+    .sort((a, b) => compareVariantDisplayOrder(
+      {
+        image_url: a.image_url,
+        label: a.label,
+        variant_index: a.variant_index,
+        released_at: a.product_released_at,
+      },
+      {
+        image_url: b.image_url,
+        label: b.label,
+        variant_index: b.variant_index,
+        released_at: b.product_released_at,
+      },
+    ))
     .map((variant) => {
       const prices = Object.fromEntries(
         (variant.prices ?? []).map((price) => [

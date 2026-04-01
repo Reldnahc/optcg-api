@@ -2,9 +2,9 @@ import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import {
   bestImageSubquery,
+  compareVariantDisplayOrder,
   formatCard,
   CardRow,
-  labelOrder,
   setName,
   thumbnailUrl,
 } from "../format.js";
@@ -400,14 +400,20 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         ...formatCard(card),
         set_name: card.set_product_name ?? setName(card.true_set_code),
         images: [...imageMap.values()]
-          .sort((a, b) => {
-            const labelDiff = labelOrder(a.label) - labelOrder(b.label);
-            if (labelDiff !== 0) return labelDiff;
-            const dateA = a.product_released_at ?? "";
-            const dateB = b.product_released_at ?? "";
-            if (dateA !== dateB) return dateA < dateB ? -1 : 1;
-            return a.variant_index - b.variant_index;
-          })
+          .sort((a, b) => compareVariantDisplayOrder(
+            {
+              image_url: a.image_url,
+              label: a.label,
+              variant_index: a.variant_index,
+              released_at: a.product_released_at,
+            },
+            {
+              image_url: b.image_url,
+              label: b.label,
+              variant_index: b.variant_index,
+              released_at: b.product_released_at,
+            },
+          ))
           .map(({ scan_url, scan_thumb_url, ...rest }) => ({
             ...rest,
             thumbnail_url: thumbnailUrl(rest.image_url),

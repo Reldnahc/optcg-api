@@ -3,6 +3,10 @@ import { labelOrder } from "../dist/format.js";
 import { createCardRow, withCardsApp } from "./helpers/cardsTestUtils.mjs";
 
 function compareVariants(a, b) {
+  const hasImageA = !!a.media.image_url;
+  const hasImageB = !!b.media.image_url;
+  if (hasImageA !== hasImageB) return hasImageA ? -1 : 1;
+
   const dateA = a.product.released_at;
   const dateB = b.product.released_at;
   if (dateA && dateB && dateA !== dateB) return dateA < dateB ? -1 : 1;
@@ -55,7 +59,7 @@ const { app, assertDone } = await withCardsApp([
         },
         {
           variant_index: 0,
-          image_url: "https://example.com/variant-0.png",
+          image_url: null,
           scan_url: "https://example.com/variant-0-scan.png",
           scan_thumb_url: "https://example.com/variant-0-scan-thumb.webp",
           artist: "Artist A",
@@ -113,8 +117,8 @@ try {
   assert.ok(Array.isArray(detailBody.data.available_languages));
   assert.ok(typeof detailBody.data.legality === "object");
 
-  assert.equal(detailBody.data.variants[0].product.name, "Earlier Product");
-  assert.equal(detailBody.data.variants[0].label, "Alternate Art");
+  assert.equal(detailBody.data.variants[0].product.name, "Later Product");
+  assert.equal(detailBody.data.variants[0].label, "Standard");
 
   if (detailBody.data.variants.length > 0) {
     const firstVariant = detailBody.data.variants[0];

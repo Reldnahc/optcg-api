@@ -31,11 +31,34 @@ export const LABEL_ORDER_SQL = labelOrderSql();
 /** SQL expression for the public card-page variant ordering. */
 export function variantDisplayOrderSql(cardImageAlias: string, productAlias: string): string {
   return [
+    `CASE WHEN NULLIF(BTRIM(COALESCE(${cardImageAlias}.image_url, '')), '') IS NULL THEN 1 ELSE 0 END`,
     `CASE WHEN ${productAlias}.released_at IS NULL THEN 1 ELSE 0 END`,
     `${productAlias}.released_at ASC`,
     labelOrderSql(cardImageAlias),
     `${cardImageAlias}.variant_index`,
   ].join(", ");
+}
+
+export function compareVariantDisplayOrder(
+  a: { image_url: string | null; label: string | null; variant_index: number; released_at: string | null },
+  b: { image_url: string | null; label: string | null; variant_index: number; released_at: string | null },
+): number {
+  const aHasImage = !!a.image_url?.trim();
+  const bHasImage = !!b.image_url?.trim();
+  if (aHasImage !== bHasImage) {
+    return aHasImage ? -1 : 1;
+  }
+
+  const dateA = a.released_at;
+  const dateB = b.released_at;
+  if (dateA && dateB && dateA !== dateB) return dateA < dateB ? -1 : 1;
+  if (dateA && !dateB) return -1;
+  if (!dateA && dateB) return 1;
+
+  const labelDiff = labelOrder(a.label) - labelOrder(b.label);
+  if (labelDiff !== 0) return labelDiff;
+
+  return a.variant_index - b.variant_index;
 }
 
 /** SQL subquery to get the best image_url for a card (by label priority). Bind card id column. */

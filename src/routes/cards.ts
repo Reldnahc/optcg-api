@@ -28,6 +28,7 @@ function extractInlineSort(node: SearchNode): { order?: string; direction?: stri
 import {
   formatCard,
   CardRow,
+  compareVariantDisplayOrder,
   labelOrder,
   LABEL_ORDER_SQL,
   bestImageSubquery,
@@ -742,18 +743,20 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       }
     }
 
-    const variants = [...imageMap.values()].sort((a, b) => {
-      const dateA = a.product.released_at;
-      const dateB = b.product.released_at;
-      if (dateA && dateB && dateA !== dateB) return dateA < dateB ? -1 : 1;
-      if (dateA && !dateB) return -1;
-      if (!dateA && dateB) return 1;
-
-      const labelDiff = labelOrder(a.label) - labelOrder(b.label);
-      if (labelDiff !== 0) return labelDiff;
-
-      return a.variant_index - b.variant_index;
-    }).map((variant) => ({
+    const variants = [...imageMap.values()].sort((a, b) => compareVariantDisplayOrder(
+      {
+        image_url: a.image_url,
+        label: a.label,
+        variant_index: a.variant_index,
+        released_at: a.product.released_at,
+      },
+      {
+        image_url: b.image_url,
+        label: b.label,
+        variant_index: b.variant_index,
+        released_at: b.product.released_at,
+      },
+    )).map((variant) => ({
       variant_index: variant.variant_index,
       label: variant.label,
       artist: variant.artist,

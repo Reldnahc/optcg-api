@@ -836,7 +836,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       );
 
       await query(
-        `UPDATE scan_batch_items
+        `UPDATE scan_ingest_items
          SET linked_card_image_id = NULL
          WHERE linked_card_image_id = ANY($1::uuid[])`,
         [ids],
@@ -844,7 +844,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     }
 
     await query(
-      `UPDATE scan_batch_items
+      `UPDATE scan_ingest_items
        SET linked_card_id = NULL
        WHERE linked_card_id = $1`,
       [card.id],

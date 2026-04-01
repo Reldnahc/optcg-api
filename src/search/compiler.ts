@@ -409,10 +409,12 @@ function compileFilter(
         case "alternate_art":
         case "alt_art": {
           const p = param(ctx, VARIANT_LABEL_MAP[value.toLowerCase()]);
-          const sql = `EXISTS (
-            SELECT 1 FROM card_images ci
-            WHERE ci.card_id = c.id AND ci.label = ${p}
-          )`;
+          const sql = ctx.unique === "prints"
+            ? `ci.label = ${p}`
+            : `EXISTS (
+              SELECT 1 FROM card_images ci
+              WHERE ci.card_id = c.id AND ci.label = ${p}
+            )`;
           return negated ? `NOT (${sql})` : sql;
         }
         case "vanilla": {
@@ -431,6 +433,23 @@ function compileFilter(
 
     case "has": {
       switch (value.toLowerCase()) {
+        case "sp":
+        case "tr":
+        case "manga":
+        case "manga_art":
+        case "fullart":
+        case "full_art":
+        case "alternate":
+        case "alt":
+        case "alternate_art":
+        case "alt_art": {
+          const p = param(ctx, VARIANT_LABEL_MAP[value.toLowerCase()]);
+          const sql = `EXISTS (
+            SELECT 1 FROM card_images ci_has
+            WHERE ci_has.card_id = c.id AND ci_has.label = ${p}
+          )`;
+          return negated ? `NOT (${sql})` : sql;
+        }
         case "price":
           return negated
             ? `NOT EXISTS (SELECT 1 FROM card_images ci JOIN tcgplayer_products tp ON tp.card_image_id = ci.id WHERE ci.card_id = c.id)`

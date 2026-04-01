@@ -182,11 +182,11 @@ export async function adminCardsRoutes(app: FastifyInstance) {
          inserted_card AS (
            INSERT INTO cards (
              card_number, language, product_id, true_set_code, name, card_type, rarity, color,
-             cost, power, counter, life, attribute, types, effect, trigger, block, artist
+             cost, power, counter, life, attribute, types, effect, trigger, block, artist, manually_added
            )
            SELECT
              $6, $1, upserted_product.id, $7, $8, $9, $10, $11::text[],
-             $12, $13, $14, $15, $16::text[], $17::text[], $18, $19, $20, $21
+             $12, $13, $14, $15, $16::text[], $17::text[], $18, $19, $20, $21, true
            FROM upserted_product
            RETURNING *
          ),

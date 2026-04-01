@@ -101,6 +101,17 @@ export function thumbnailUrl(imageUrl: string | null): string | null {
 
   try {
     const url = new URL(imageUrl);
+    const hostname = url.hostname.toLowerCase();
+    if (
+      url.pathname.includes("/thumbs/")
+      || url.search
+      || hostname.includes("discordapp.com")
+      || hostname.includes("discordapp.net")
+      || hostname.includes("discord.com")
+    ) {
+      return imageUrl;
+    }
+
     const slashIndex = url.pathname.lastIndexOf("/");
     if (slashIndex === -1) return null;
 

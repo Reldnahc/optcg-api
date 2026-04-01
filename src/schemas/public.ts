@@ -641,6 +641,43 @@ export const cardDetailRouteSchema = {
   },
 };
 
+export const cardBatchRouteSchema = {
+  tags: ["Cards"],
+  summary: "Get batch card detail",
+  body: {
+    type: "object",
+    additionalProperties: false,
+    required: ["card_numbers"],
+    properties: {
+      card_numbers: {
+        type: "array",
+        minItems: 1,
+        maxItems: 60,
+        items: { type: "string" },
+      },
+      lang: { type: "string" },
+    },
+  },
+  response: {
+    200: {
+      type: "object",
+      additionalProperties: false,
+      required: ["data", "missing"],
+      properties: {
+        data: {
+          type: "object",
+          additionalProperties: cardDetailSchema,
+        },
+        missing: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+    },
+    400: errorEnvelopeSchema,
+  },
+};
+
 export const cardPlainTextRouteSchema = {
   tags: ["Cards"],
   summary: "Get plain-text card text",

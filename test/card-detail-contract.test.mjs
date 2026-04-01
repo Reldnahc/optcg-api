@@ -35,10 +35,12 @@ const { app, assertDone } = await withCardsApp([
     },
   },
   {
-    match: "SELECT ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url",
+    match: "SELECT ci.card_id, c.card_number, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url",
     result: {
       rows: [
         {
+          card_id: "card-1",
+          card_number: "OP05-091",
           variant_index: 1,
           image_url: "https://example.com/variant-1.png",
           scan_url: "https://example.com/variant-1-scan.png",
@@ -58,6 +60,8 @@ const { app, assertDone } = await withCardsApp([
           sub_type: "Normal",
         },
         {
+          card_id: "card-1",
+          card_number: "OP05-091",
           variant_index: 0,
           image_url: null,
           scan_url: "https://example.com/variant-0-scan.png",
@@ -80,10 +84,6 @@ const { app, assertDone } = await withCardsApp([
     },
   },
   {
-    match: "SELECT EXISTS(SELECT 1 FROM card_images ci",
-    result: { rows: [{ exists: false }] },
-  },
-  {
     match: "COALESCE(BOOL_AND(",
     result: {
       rows: [
@@ -92,13 +92,13 @@ const { app, assertDone } = await withCardsApp([
     },
   },
   {
-    match: "SELECT f.name AS format_name, fb.ban_type",
+    match: "SELECT fb.card_number, f.name AS format_name, fb.ban_type",
     result: { rows: [] },
   },
   {
-    match: "SELECT DISTINCT language FROM cards",
+    match: "SELECT DISTINCT card_number, language FROM cards",
     result: {
-      rows: [{ language: "en" }, { language: "ja" }],
+      rows: [{ card_number: "OP05-091", language: "en" }, { card_number: "OP05-091", language: "ja" }],
     },
   },
 ]);

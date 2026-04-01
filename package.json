@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "npm run build && node test/search.test.mjs && node test/sets.test.mjs && node test/formats.test.mjs && node test/docs.test.mjs && node test/cards-summary-contract.test.mjs && node test/card-detail-contract.test.mjs && node test/card-plaintext-contract.test.mjs",
+    "test": "npm run build && node test/search.test.mjs && node test/sets.test.mjs && node test/formats.test.mjs && node test/docs.test.mjs && node test/cards-summary-contract.test.mjs && node test/card-detail-contract.test.mjs && node test/card-batch-contract.test.mjs && node test/card-plaintext-contract.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

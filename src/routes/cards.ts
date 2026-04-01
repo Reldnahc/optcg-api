@@ -8,6 +8,7 @@ import { formatBlockAllowedSql } from "../formatLegality.js";
 import { normalizeColorFilter, toPgTextArrayLiteral } from "../colors.js";
 import {
   cardAutocompleteRouteSchema,
+  cardBatchRouteSchema,
   cardDetailRouteSchema,
   cardPlainTextRouteSchema,
   cardsSearchRouteSchema,
@@ -140,6 +141,242 @@ function collectPositiveFilterValues(node: SearchNode, field: string): string[] 
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+type CardDetailRow = CardRow & { set_product_name: string | null };
+
+type CardImageRow = {
+  card_id: string;
+  card_number: string;
+  variant_index: number;
+  image_url: string | null;
+  scan_url: string | null;
+  scan_thumb_url: string | null;
+  artist: string | null;
+  label: string | null;
+  classified: boolean;
+  product_name: string | null;
+  product_set_code: string | null;
+  product_released_at: string | null;
+  canonical_tcgplayer_url: string | null;
+  tcgplayer_url: string | null;
+  market_price: string | null;
+  low_price: string | null;
+  mid_price: string | null;
+  high_price: string | null;
+  sub_type: string | null;
+};
+
+type FormatLegalityRow = {
+  block: string | null;
+  format_name: string;
+  legal: boolean;
+};
+
+type CardBanRow = {
+  card_number: string;
+  format_name: string;
+  ban_type: string;
+  max_copies: number | null;
+  banned_at: string;
+  reason: string | null;
+  paired_card_number: string | null;
+};
+
+type CardLanguageRow = {
+  card_number: string;
+  language: string;
+};
+
+type VariantDetail = {
+  variant_index: number;
+  label: string | null;
+  artist: string | null;
+  image_url: string | null;
+  scan_url: string | null;
+  scan_thumb_url: string | null;
+  product: {
+    name: string | null;
+    set_code: string | null;
+    released_at: string | null;
+  };
+  market: {
+    tcgplayer_url: string | null;
+    prices: Record<string, {
+      market_price: string | null;
+      low_price: string | null;
+      mid_price: string | null;
+      high_price: string | null;
+      tcgplayer_url: string | null;
+    }>;
+  };
+};
+
+function normalizeRequestedCardNumbers(cardNumbers: unknown): string[] {
+  if (!Array.isArray(cardNumbers)) return [];
+  return [...new Set(cardNumbers
+    .map((value) => typeof value === "string" ? value.trim().toUpperCase() : "")
+    .filter(Boolean))];
+}
+
+function groupImagesByCardNumber(imageRows: CardImageRow[]): Map<string, CardImageRow[]> {
+  const rowsByCardNumber = new Map<string, CardImageRow[]>();
+  for (const row of imageRows) {
+    const key = row.card_number.toUpperCase();
+    const rows = rowsByCardNumber.get(key) ?? [];
+    rows.push(row);
+    rowsByCardNumber.set(key, rows);
+  }
+  return rowsByCardNumber;
+}
+
+function buildVariants(imageRows: CardImageRow[]) {
+  const imageMap = new Map<number, VariantDetail>();
+
+  for (const img of imageRows) {
+    if (!img.classified) continue;
+
+    let entry = imageMap.get(img.variant_index);
+    if (!entry) {
+      entry = {
+        variant_index: img.variant_index,
+        label: img.label,
+        artist: img.artist,
+        image_url: img.image_url,
+        scan_url: img.scan_url,
+        scan_thumb_url: img.scan_thumb_url,
+        product: {
+          name: img.product_name,
+          set_code: img.product_set_code,
+          released_at: img.product_released_at,
+        },
+        market: {
+          tcgplayer_url: img.canonical_tcgplayer_url,
+          prices: {},
+        },
+      };
+      imageMap.set(img.variant_index, entry);
+    }
+
+    if (!entry.market.tcgplayer_url && img.canonical_tcgplayer_url) {
+      entry.market.tcgplayer_url = img.canonical_tcgplayer_url;
+    }
+
+    if (img.market_price !== null) {
+      const key = img.sub_type || "Normal";
+      entry.market.prices[key] = {
+        market_price: img.market_price,
+        low_price: img.low_price,
+        mid_price: img.mid_price,
+        high_price: img.high_price,
+        tcgplayer_url: img.tcgplayer_url,
+      };
+    }
+  }
+
+  return [...imageMap.values()].sort((a, b) => compareVariantDisplayOrder(
+    {
+      image_url: a.image_url,
+      label: a.label,
+      variant_index: a.variant_index,
+      released_at: a.product.released_at,
+    },
+    {
+      image_url: b.image_url,
+      label: b.label,
+      variant_index: b.variant_index,
+      released_at: b.product.released_at,
+    },
+  )).map((variant) => ({
+    variant_index: variant.variant_index,
+    label: variant.label,
+    artist: variant.artist,
+    product: variant.product,
+    media: {
+      image_url: variant.image_url,
+      thumbnail_url: thumbnailUrl(variant.image_url),
+      scan_url: variant.scan_url,
+      scan_thumbnail_url: variant.scan_thumb_url,
+    },
+    market: variant.market,
+  }));
+}
+
+function hasMangaVariant(imageRows: CardImageRow[]): boolean {
+  return imageRows.some((row) => row.label === "Manga Art");
+}
+
+function buildLegality(
+  card: CardDetailRow,
+  legalityRows: FormatLegalityRow[],
+  cardBanRows: CardBanRow[],
+  mangaExempt: boolean,
+) {
+  const now = new Date();
+  const isReleased = card.released_at ? new Date(card.released_at) <= now : false;
+
+  const bansByFormat = new Map<string, CardBanRow[]>();
+  for (const ban of cardBanRows) {
+    const rows = bansByFormat.get(ban.format_name) ?? [];
+    rows.push(ban);
+    bansByFormat.set(ban.format_name, rows);
+  }
+
+  const legalityObj: Record<string, {
+    status: string;
+    banned_at?: string;
+    reason?: string;
+    max_copies?: number;
+    paired_with?: string[];
+  }> = {};
+
+  for (const row of legalityRows) {
+    const bans = bansByFormat.get(row.format_name) ?? [];
+
+    if (!isReleased) {
+      const releaseDate = card.released_at ? new Date(card.released_at) : null;
+      const status = releaseDate
+        ? `Releases ${releaseDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
+        : "unreleased";
+      legalityObj[row.format_name] = { status };
+    } else if (bans.length > 0) {
+      const ban = bans[0];
+      const entry: typeof legalityObj[string] = { status: ban.ban_type };
+      if (ban.banned_at) entry.banned_at = ban.banned_at;
+      if (ban.reason) entry.reason = ban.reason;
+      if (ban.ban_type === "restricted" && ban.max_copies != null) {
+        entry.max_copies = ban.max_copies;
+      }
+      if (ban.ban_type === "pair") {
+        entry.paired_with = bans
+          .filter((b) => b.paired_card_number)
+          .map((b) => b.paired_card_number!);
+      }
+      legalityObj[row.format_name] = entry;
+    } else if (row.legal || mangaExempt) {
+      legalityObj[row.format_name] = { status: "legal" };
+    } else {
+      legalityObj[row.format_name] = { status: "not_legal" };
+    }
+  }
+
+  return legalityObj;
+}
+
+function buildCardDetail(
+  card: CardDetailRow,
+  imageRows: CardImageRow[],
+  legalityRows: FormatLegalityRow[],
+  cardBanRows: CardBanRow[],
+  languageRows: CardLanguageRow[],
+) {
+  return {
+    ...formatCard(card),
+    set_name: card.set_product_name ?? setName(card.true_set_code),
+    variants: buildVariants(imageRows),
+    legality: buildLegality(card, legalityRows, cardBanRows, hasMangaVariant(imageRows)),
+    available_languages: languageRows.map((row) => row.language),
+  };
 }
 
 export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOptions = {}) {
@@ -566,6 +803,153 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     return { data: rows.rows.map((r: { name: string }) => r.name) };
   });
 
+  app.post("/cards/batch", { schema: cardBatchRouteSchema }, async (req, reply) => {
+    const body = (req.body ?? {}) as { card_numbers?: unknown; lang?: string };
+    const requestedCardNumbers = normalizeRequestedCardNumbers(body.card_numbers);
+    const lang = body.lang || "en";
+
+    if (requestedCardNumbers.length === 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "card_numbers must include at least one card number" } };
+    }
+
+    const cardResult = await runQuery<CardDetailRow>(
+      `SELECT c.*, p.name AS product_name, p.released_at,
+              (SELECT p2.name FROM products p2
+               WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
+               LIMIT 1) AS set_product_name
+       FROM cards c
+       LEFT JOIN products p ON p.id = c.product_id
+       WHERE UPPER(c.card_number) = ANY($1::text[]) AND c.language = $2`,
+      [requestedCardNumbers, lang],
+    );
+
+    const cardsByNumber = new Map(
+      cardResult.rows.map((row) => [row.card_number.toUpperCase(), row]),
+    );
+    const foundCards = requestedCardNumbers
+      .map((cardNumber) => cardsByNumber.get(cardNumber))
+      .filter((row): row is CardDetailRow => Boolean(row));
+
+    if (foundCards.length === 0) {
+      reply.header("Cache-Control", "public, max-age=86400");
+      return {
+        data: {},
+        missing: requestedCardNumbers,
+      };
+    }
+
+    const cardIds = foundCards.map((card) => card.id);
+    const distinctBlocks = uniqueStrings(foundCards.map((card) => card.block).filter((block): block is string => Boolean(block)));
+    const foundCardNumbers = foundCards.map((card) => card.card_number.toUpperCase());
+
+    const [images, legality, cardBans, languages] = await Promise.all([
+      runQuery<CardImageRow>(
+        `SELECT ci.card_id, c.card_number, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
+                ci.artist,
+                ci.label, ci.classified,
+                ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
+                canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,
+                tp.tcgplayer_url, tp.sub_type,
+                pr.market_price, pr.low_price, pr.mid_price, pr.high_price
+         FROM card_images ci
+         JOIN cards c ON c.id = ci.card_id
+         LEFT JOIN products ip ON ip.id = ci.product_id
+         LEFT JOIN LATERAL (
+           SELECT tp2.tcgplayer_url
+           FROM tcgplayer_products tp2
+           WHERE tp2.card_image_id = ci.id
+           ORDER BY ${tcgplayerProductOrderSql("tp2")}
+           LIMIT 1
+         ) canonical_tp ON true
+         LEFT JOIN tcgplayer_products tp ON tp.card_image_id = ci.id
+         LEFT JOIN LATERAL (
+           SELECT market_price, low_price, mid_price, high_price
+           FROM tcgplayer_prices
+           WHERE tcgplayer_product_id = tp.tcgplayer_product_id
+             AND sub_type IS NOT DISTINCT FROM tp.sub_type
+           ORDER BY fetched_at DESC LIMIT 1
+         ) pr ON true
+         WHERE ci.card_id = ANY($1::uuid[])
+         ORDER BY c.card_number, ci.variant_index, ${tcgplayerProductOrderSql("tp")}`,
+        [cardIds],
+      ),
+      distinctBlocks.length > 0
+        ? runQuery<FormatLegalityRow>(
+          `WITH requested_blocks AS (
+             SELECT DISTINCT UNNEST($1::text[]) AS block
+           )
+           SELECT rb.block, f.name AS format_name,
+                  COALESCE(BOOL_AND(${formatBlockAllowedSql("flb", "f")}), false) AS legal
+           FROM requested_blocks rb
+           CROSS JOIN formats f
+           LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = rb.block
+           GROUP BY rb.block, f.id, f.name`,
+          [distinctBlocks],
+        )
+        : Promise.resolve({ rows: [] as FormatLegalityRow[] }),
+      runQuery<CardBanRow>(
+        `SELECT fb.card_number, f.name AS format_name, fb.ban_type, fb.max_copies, fb.banned_at, fb.reason, fb.paired_card_number
+         FROM format_bans fb
+         JOIN formats f ON f.id = fb.format_id
+         WHERE UPPER(fb.card_number) = ANY($1::text[]) AND fb.unbanned_at IS NULL`,
+        [foundCardNumbers],
+      ),
+      runQuery<CardLanguageRow>(
+        `SELECT DISTINCT card_number, language
+         FROM cards
+         WHERE UPPER(card_number) = ANY($1::text[])
+         ORDER BY card_number, language`,
+        [foundCardNumbers],
+      ),
+    ]);
+
+    const imagesByCardNumber = groupImagesByCardNumber(images.rows);
+    const legalityByBlock = new Map<string, FormatLegalityRow[]>();
+    for (const row of legality.rows) {
+      const key = row.block ?? "";
+      const rows = legalityByBlock.get(key) ?? [];
+      rows.push(row);
+      legalityByBlock.set(key, rows);
+    }
+
+    const bansByCardNumber = new Map<string, CardBanRow[]>();
+    for (const row of cardBans.rows) {
+      const key = row.card_number.toUpperCase();
+      const rows = bansByCardNumber.get(key) ?? [];
+      rows.push(row);
+      bansByCardNumber.set(key, rows);
+    }
+
+    const languagesByCardNumber = new Map<string, CardLanguageRow[]>();
+    for (const row of languages.rows) {
+      const key = row.card_number.toUpperCase();
+      const rows = languagesByCardNumber.get(key) ?? [];
+      rows.push(row);
+      languagesByCardNumber.set(key, rows);
+    }
+
+    const data = Object.fromEntries(foundCards.map((card) => {
+      const key = card.card_number.toUpperCase();
+      return [
+        card.card_number,
+        buildCardDetail(
+          card,
+          imagesByCardNumber.get(key) ?? [],
+          legalityByBlock.get(card.block ?? "") ?? [],
+          bansByCardNumber.get(key) ?? [],
+          languagesByCardNumber.get(key) ?? [],
+        ),
+      ];
+    }));
+
+    reply.header("Cache-Control", "public, max-age=86400");
+    return {
+      data,
+      missing: requestedCardNumbers.filter((cardNumber) => !cardsByNumber.has(cardNumber)),
+    };
+  });
+
   app.get("/cards/:card_number/text", { schema: cardPlainTextRouteSchema }, async (req, reply) => {
     const { card_number } = req.params as { card_number: string };
     const qs = req.query as Record<string, string>;
@@ -615,28 +999,9 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
 
     const card = cardResult.rows[0];
 
-    // Run images, manga check, legality, and available languages in parallel
-    const [images, hasManga, legality, cardBans, languages] = await Promise.all([
-      runQuery<{
-        variant_index: number;
-        image_url: string | null;
-        scan_url: string | null;
-        scan_thumb_url: string | null;
-        artist: string | null;
-        label: string | null;
-        classified: boolean;
-        product_name: string | null;
-        product_set_code: string | null;
-        product_released_at: string | null;
-        canonical_tcgplayer_url: string | null;
-        tcgplayer_url: string | null;
-        market_price: string | null;
-        low_price: string | null;
-        mid_price: string | null;
-        high_price: string | null;
-        sub_type: string | null;
-      }>(
-        `SELECT ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
+    const [images, legality, cardBans, languages] = await Promise.all([
+      runQuery<CardImageRow>(
+        `SELECT ci.card_id, c.card_number, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,
                 ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
@@ -665,191 +1030,30 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
          ORDER BY ci.variant_index, ${tcgplayerProductOrderSql("tp")}`,
         [card.id],
       ),
-      runQuery<{ exists: boolean }>(
-        `SELECT EXISTS(SELECT 1 FROM card_images ci WHERE ci.card_id = $1 AND ci.label = 'Manga Art') AS exists`,
-        [card.id],
-      ),
-      runQuery<{
-        format_name: string;
-        legal: boolean;
-      }>(
-        `SELECT f.name AS format_name,
+      runQuery<FormatLegalityRow>(
+        `SELECT $1::text AS block, f.name AS format_name,
                 COALESCE(BOOL_AND(${formatBlockAllowedSql("flb", "f")}), false) AS legal
          FROM formats f
          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = $1
          GROUP BY f.id, f.name`,
         [card.block],
       ),
-      runQuery<{
-        format_name: string;
-        ban_type: string;
-        max_copies: number | null;
-        banned_at: string;
-        reason: string | null;
-        paired_card_number: string | null;
-      }>(
-        `SELECT f.name AS format_name, fb.ban_type, fb.max_copies, fb.banned_at, fb.reason, fb.paired_card_number
+      runQuery<CardBanRow>(
+        `SELECT fb.card_number, f.name AS format_name, fb.ban_type, fb.max_copies, fb.banned_at, fb.reason, fb.paired_card_number
          FROM format_bans fb
          JOIN formats f ON f.id = fb.format_id
          WHERE fb.card_number = $1 AND fb.unbanned_at IS NULL`,
         [card.card_number],
       ),
-      runQuery<{ language: string }>(
-        `SELECT DISTINCT language FROM cards WHERE card_number ILIKE $1 ORDER BY language`,
+      runQuery<CardLanguageRow>(
+        `SELECT DISTINCT card_number, language FROM cards WHERE card_number ILIKE $1 ORDER BY language`,
         [card_number],
       ),
     ]);
 
-    const mangaExempt = hasManga.rows[0].exists;
-
-    // Determine if the card is released
-    const now = new Date();
-    const isReleased = card.released_at ? new Date(card.released_at) <= now : false;
-
-    // Group classified images by variant, aggregate prices by sub_type
-    const imageMap = new Map<number, {
-      variant_index: number;
-      label: string | null;
-      artist: string | null;
-      image_url: string | null;
-      scan_url: string | null;
-      scan_thumb_url: string | null;
-      product: {
-        name: string | null;
-        set_code: string | null;
-        released_at: string | null;
-      };
-      market: {
-        tcgplayer_url: string | null;
-        prices: Record<string, {
-          market_price: string | null;
-          low_price: string | null;
-          mid_price: string | null;
-          high_price: string | null;
-          tcgplayer_url: string | null;
-        }>;
-      };
-    }>();
-
-    for (const img of images.rows) {
-      if (!img.classified) continue;
-      let entry = imageMap.get(img.variant_index);
-      if (!entry) {
-        entry = {
-          variant_index: img.variant_index,
-          label: img.label,
-          artist: img.artist,
-          image_url: img.image_url,
-          scan_url: img.scan_url,
-          scan_thumb_url: img.scan_thumb_url,
-          product: {
-            name: img.product_name,
-            set_code: img.product_set_code,
-            released_at: img.product_released_at,
-          },
-          market: {
-            tcgplayer_url: img.canonical_tcgplayer_url,
-            prices: {},
-          },
-        };
-        imageMap.set(img.variant_index, entry);
-      }
-      if (!entry.market.tcgplayer_url && img.canonical_tcgplayer_url) {
-        entry.market.tcgplayer_url = img.canonical_tcgplayer_url;
-      }
-      if (img.market_price !== null) {
-        const key = img.sub_type || "Normal";
-        entry.market.prices[key] = {
-          market_price: img.market_price,
-          low_price: img.low_price,
-          mid_price: img.mid_price,
-          high_price: img.high_price,
-          tcgplayer_url: img.tcgplayer_url,
-        };
-      }
-    }
-
-    const variants = [...imageMap.values()].sort((a, b) => compareVariantDisplayOrder(
-      {
-        image_url: a.image_url,
-        label: a.label,
-        variant_index: a.variant_index,
-        released_at: a.product.released_at,
-      },
-      {
-        image_url: b.image_url,
-        label: b.label,
-        variant_index: b.variant_index,
-        released_at: b.product.released_at,
-      },
-    )).map((variant) => ({
-      variant_index: variant.variant_index,
-      label: variant.label,
-      artist: variant.artist,
-      product: variant.product,
-      media: {
-        image_url: variant.image_url,
-        thumbnail_url: thumbnailUrl(variant.image_url),
-        scan_url: variant.scan_url,
-        scan_thumbnail_url: variant.scan_thumb_url,
-      },
-      market: variant.market,
-    }));
-
-    // Group bans by format
-    const bansByFormat = new Map<string, typeof cardBans.rows>();
-    for (const ban of cardBans.rows) {
-      const arr = bansByFormat.get(ban.format_name) ?? [];
-      arr.push(ban);
-      bansByFormat.set(ban.format_name, arr);
-    }
-
-    const legalityObj: Record<string, {
-      status: string;
-      banned_at?: string;
-      reason?: string;
-      max_copies?: number;
-      paired_with?: string[];
-    }> = {};
-    for (const row of legality.rows) {
-      const bans = bansByFormat.get(row.format_name) ?? [];
-
-      if (!isReleased) {
-        const releaseDate = card.released_at ? new Date(card.released_at) : null;
-        const status = releaseDate
-          ? `Releases ${releaseDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`
-          : "unreleased";
-        legalityObj[row.format_name] = { status };
-      } else if (bans.length > 0) {
-        const ban = bans[0];
-        const entry: typeof legalityObj[string] = { status: ban.ban_type };
-        if (ban.banned_at) entry.banned_at = ban.banned_at;
-        if (ban.reason) entry.reason = ban.reason;
-        if (ban.ban_type === "restricted" && ban.max_copies != null) {
-          entry.max_copies = ban.max_copies;
-        }
-        if (ban.ban_type === "pair") {
-          entry.paired_with = bans
-            .filter((b) => b.paired_card_number)
-            .map((b) => b.paired_card_number!);
-        }
-        legalityObj[row.format_name] = entry;
-      } else if (row.legal || mangaExempt) {
-        legalityObj[row.format_name] = { status: "legal" };
-      } else {
-        legalityObj[row.format_name] = { status: "not_legal" };
-      }
-    }
-
     reply.header("Cache-Control", "public, max-age=86400");
     return {
-      data: {
-        ...formatCard(card),
-        set_name: card.set_product_name ?? setName(card.true_set_code),
-        variants,
-        legality: legalityObj,
-        available_languages: languages.rows.map((r) => r.language),
-      },
+      data: buildCardDetail(card, images.rows, legality.rows, cardBans.rows, languages.rows),
     };
   });
 }

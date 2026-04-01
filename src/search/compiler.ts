@@ -17,10 +17,20 @@ export interface CompiledSearch {
 const RARITY_MAP: Record<string, string> = {
   l: "L",
   c: "C",
+  common: "C",
   uc: "UC",
+  uncommon: "UC",
   r: "R",
   sr: "SR",
+  super: "SR",
+  superrare: "SR",
+  "super-rare": "SR",
+  super_rare: "SR",
   sec: "SEC",
+  secret: "SEC",
+  secretrare: "SEC",
+  "secret-rare": "SEC",
+  secret_rare: "SEC",
 };
 
 const VARIANT_LABEL_MAP: Record<string, string> = {
@@ -30,10 +40,23 @@ const VARIANT_LABEL_MAP: Record<string, string> = {
   manga_art: "Manga Art",
   fullart: "Full Art",
   full_art: "Full Art",
+  fa: "Full Art",
   alternate: "Alternate Art",
   alt: "Alternate Art",
+  aa: "Alternate Art",
   alternate_art: "Alternate Art",
   alt_art: "Alternate Art",
+};
+
+const TYPE_MAP: Record<string, string> = {
+  leader: "Leader",
+  lead: "Leader",
+  character: "Character",
+  char: "Character",
+  event: "Event",
+  evt: "Event",
+  stage: "Stage",
+  stg: "Stage",
 };
 
 export function compileSearch(
@@ -258,7 +281,8 @@ function compileFilter(
     }
 
     case "type": {
-      const p = param(ctx, value);
+      const normalizedType = TYPE_MAP[value.toLowerCase()] ?? value;
+      const p = param(ctx, normalizedType);
       const sql = `c.card_type ILIKE ${p}`;
       return negated ? `NOT (${sql})` : sql;
     }
@@ -404,8 +428,10 @@ function compileFilter(
         case "manga_art":
         case "fullart":
         case "full_art":
+        case "fa":
         case "alternate":
         case "alt":
+        case "aa":
         case "alternate_art":
         case "alt_art": {
           const p = param(ctx, VARIANT_LABEL_MAP[value.toLowerCase()]);
@@ -439,8 +465,10 @@ function compileFilter(
         case "manga_art":
         case "fullart":
         case "full_art":
+        case "fa":
         case "alternate":
         case "alt":
+        case "aa":
         case "alternate_art":
         case "alt_art": {
           const p = param(ctx, VARIANT_LABEL_MAP[value.toLowerCase()]);

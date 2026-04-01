@@ -330,6 +330,59 @@ const tests = [
     },
   },
   {
+    name: "route supports explicit type, rarity, and variant aliases",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ params }) => {
+            assert.ok(params.includes("Character"));
+            assert.ok(params.includes("SEC"));
+            assert.ok(params.includes("Alternate Art"));
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ params }) => {
+            assert.ok(params.includes("Character"));
+            assert.ok(params.includes("SEC"));
+            assert.ok(params.includes("Alternate Art"));
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP15-001",
+                name: "Alias Bundle",
+                card_type: "Character",
+                rarity: "SEC",
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "t:char r:secret is:aa",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP15-001");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
     name: "route treats is:sp as a print-level variant filter",
     fn: async () => {
       const { app, assertDone } = await withCardsApp([
@@ -542,6 +595,14 @@ const tests = [
     },
   },
   {
+    name: "compiler supports short color aliases",
+    fn: () => {
+      const compiled = compileSearch(parseSearch("c:u,b"), 1, "cards");
+      assert.match(compiled.sql, /c\.color && \$1::text\[\]/);
+      assert.deepEqual(compiled.params, ["{Blue,Black}"]);
+    },
+  },
+  {
     name: "compiler treats exact multicolor filters as order-insensitive",
     fn: () => {
       const compiled = compileSearch(parseSearch("c=yellow,red"), 1, "cards");
@@ -584,6 +645,22 @@ const tests = [
       const hasSp = compileSearch(parseSearch("has:sp"), 1, "prints");
       assert.match(hasSp.sql, /ci_has\.label = \$1/);
       assert.deepEqual(hasSp.params, ["SP"]);
+    },
+  },
+  {
+    name: "compiler supports explicit type, rarity, and variant aliases",
+    fn: () => {
+      const type = compileSearch(parseSearch("t:char"), 1, "cards");
+      assert.match(type.sql, /c\.card_type ILIKE \$1/);
+      assert.deepEqual(type.params, ["Character"]);
+
+      const rarity = compileSearch(parseSearch("r:secret"), 1, "cards");
+      assert.match(rarity.sql, /c\.rarity = \$1/);
+      assert.deepEqual(rarity.params, ["SEC"]);
+
+      const variant = compileSearch(parseSearch("is:aa"), 1, "cards");
+      assert.match(variant.sql, /ci\.label = \$1/);
+      assert.deepEqual(variant.params, ["Alternate Art"]);
     },
   },
   {
@@ -710,6 +787,56 @@ const tests = [
         assert.equal(response.statusCode, 200);
         const body = response.json();
         assert.equal(body.data[0].card_number, "OP07-999");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route supports short color aliases in query params",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.color && \$2::text\[\]/);
+            assert.equal(params[1], "{Blue,Black}");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.color && \$2::text\[\]/);
+            assert.equal(params[1], "{Blue,Black}");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP14-777",
+                name: "Alias Match",
+                color: ["Blue", "Black"],
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            color: "u,b",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP14-777");
         assertDone();
       } finally {
         await app.close();

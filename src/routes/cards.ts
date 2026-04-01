@@ -319,28 +319,30 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       hasSearchRankComponent = true;
     }
 
-    for (const typeValue of typeBoostValues) {
-      const typeParam = `$${rowParamIdx++}`;
-      rowParams.push(typeValue);
-      searchRankSql += ` + CASE WHEN c.card_type ILIKE ${typeParam} THEN 120 ELSE 0 END`;
-      hasSearchRankComponent = true;
-    }
+    if (useSearchRank) {
+      for (const typeValue of typeBoostValues) {
+        const typeParam = `$${rowParamIdx++}`;
+        rowParams.push(typeValue);
+        searchRankSql += ` + CASE WHEN c.card_type ILIKE ${typeParam} THEN 120 ELSE 0 END`;
+        hasSearchRankComponent = true;
+      }
 
-    for (const rarityValue of rarityBoostValues) {
-      const rarityParam = `$${rowParamIdx++}`;
-      rowParams.push(rarityValue);
-      searchRankSql += ` + CASE WHEN c.rarity = ${rarityParam} THEN 100 ELSE 0 END`;
-      hasSearchRankComponent = true;
-    }
+      for (const rarityValue of rarityBoostValues) {
+        const rarityParam = `$${rowParamIdx++}`;
+        rowParams.push(rarityValue);
+        searchRankSql += ` + CASE WHEN c.rarity = ${rarityParam} THEN 100 ELSE 0 END`;
+        hasSearchRankComponent = true;
+      }
 
-    for (const variantValue of variantBoostValues) {
-      const variantParam = `$${rowParamIdx++}`;
-      rowParams.push(NATURAL_LANGUAGE_VARIANT_KEYWORDS[variantValue.toLowerCase()]);
-      searchRankSql += ` + CASE WHEN EXISTS (
-        SELECT 1 FROM card_images ci_variant_boost
-        WHERE ci_variant_boost.card_id = c.id AND ci_variant_boost.label = ${variantParam}
-      ) THEN 90 ELSE 0 END`;
-      hasSearchRankComponent = true;
+      for (const variantValue of variantBoostValues) {
+        const variantParam = `$${rowParamIdx++}`;
+        rowParams.push(NATURAL_LANGUAGE_VARIANT_KEYWORDS[variantValue.toLowerCase()]);
+        searchRankSql += ` + CASE WHEN EXISTS (
+          SELECT 1 FROM card_images ci_variant_boost
+          WHERE ci_variant_boost.card_id = c.id AND ci_variant_boost.label = ${variantParam}
+        ) THEN 90 ELSE 0 END`;
+        hasSearchRankComponent = true;
+      }
     }
     const relevanceActive = Boolean(useSearchRank && hasSearchRankComponent);
     const requestedSort = (wantsRelevanceSort || (relevanceActive && !qs.sort && !inlineSortProvided))

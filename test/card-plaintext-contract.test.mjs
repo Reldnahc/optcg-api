@@ -40,7 +40,7 @@ try {
       "Avalo Pizarro",
       "Yellow Character OP16-102 UC",
       "1 Cost / 2000 Power (Special)",
-      "Impel Down/ Blackbeard Pirates",
+      "Impel Down / Blackbeard Pirates",
       "Counter +2000",
       "",
       "[On K.O] Draw one card. Then play up to 1 [Fullalead] from your hand or trash.",

@@ -256,7 +256,7 @@ export function formatCardPlainText(row: CardRow): string {
     row.name,
     formatCardHeadline(row),
     formatCardStats(row),
-    row.types.join("/ "),
+    row.types.join(" / "),
     row.counter != null ? `Counter +${row.counter}` : null,
   ].filter((line): line is string => Boolean(line && line.trim()));
 

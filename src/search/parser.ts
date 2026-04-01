@@ -78,6 +78,7 @@ const FIELD_ALIASES: Record<string, string> = {
   t: "type",
   type: "type",
   cost: "cost",
+  p: "power",
   pow: "power",
   power: "power",
   life: "life",

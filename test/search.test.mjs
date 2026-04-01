@@ -337,24 +337,28 @@ const tests = [
     },
   },
   {
-    name: "route supports explicit type, rarity, and variant aliases",
+    name: "route supports explicit type, rarity, variant, and power aliases",
     fn: async () => {
       const { app, assertDone } = await withCardsApp([
         {
           match: "SELECT COUNT(*) AS total",
-          assert: ({ params }) => {
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.power >= \$5/);
             assert.ok(params.includes("Character"));
             assert.ok(params.includes("SEC"));
             assert.ok(params.includes("Alternate Art"));
+            assert.ok(params.includes(7000));
           },
           result: { rows: [{ total: "1" }] },
         },
         {
           match: "SELECT c.*, p.name AS product_name, p.released_at",
-          assert: ({ params }) => {
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.power >= \$5/);
             assert.ok(params.includes("Character"));
             assert.ok(params.includes("SEC"));
             assert.ok(params.includes("Alternate Art"));
+            assert.ok(params.includes(7000));
           },
           result: {
             rows: [
@@ -363,6 +367,7 @@ const tests = [
                 name: "Alias Bundle",
                 card_type: "Character",
                 rarity: "SEC",
+                power: 7000,
               }),
             ],
           },
@@ -374,7 +379,7 @@ const tests = [
           method: "GET",
           url: "/v1/cards",
           query: {
-            q: "t:char r:secret is:aa",
+            q: "t:char r:secret is:aa p>=7000",
             limit: "5",
             unique: "cards",
           },
@@ -655,7 +660,7 @@ const tests = [
     },
   },
   {
-    name: "compiler supports explicit type, rarity, and variant aliases",
+    name: "compiler supports explicit type, rarity, variant, and power aliases",
     fn: () => {
       const type = compileSearch(parseSearch("t:char"), 1, "cards");
       assert.match(type.sql, /c\.card_type ILIKE \$1/);
@@ -668,6 +673,10 @@ const tests = [
       const variant = compileSearch(parseSearch("is:aa"), 1, "cards");
       assert.match(variant.sql, /ci\.label = \$1/);
       assert.deepEqual(variant.params, ["Alternate Art"]);
+
+      const power = compileSearch(parseSearch("p>=7000"), 1, "cards");
+      assert.match(power.sql, /c\.power >= \$1/);
+      assert.deepEqual(power.params, [7000]);
     },
   },
   {

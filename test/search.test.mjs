@@ -115,6 +115,23 @@ const tests = [
     },
   },
   {
+    name: "parser rewrites standalone variant words in multi-term searches",
+    fn: () => {
+      const ast = parseSearch("luffy manga");
+      assert.equal(ast.type, "and");
+      assert.deepEqual(ast.children, [
+        { type: "name", value: "luffy", negated: false },
+        {
+          type: "or",
+          children: [
+            { type: "name", value: "manga", negated: false },
+            { type: "filter", field: "is", operator: ":", value: "manga", negated: false },
+          ],
+        },
+      ]);
+    },
+  },
+  {
     name: "route matches card names containing literal Not",
     fn: async () => {
       const { app, assertDone } = await withCardsApp([
@@ -306,6 +323,57 @@ const tests = [
         assert.equal(response.statusCode, 200);
         const body = response.json();
         assert.equal(body.data[0].card_number, "OP11-118");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route treats variant words as variant boosts without dropping name matches",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$8/);
+            assert.equal(params[7], "SP");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$8/);
+            assert.match(sql, /ci_variant_boost\.label = \$16/);
+            assert.equal(params[7], "SP");
+            assert.equal(params[15], "SP");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP12-001",
+                name: "Monkey D. Luffy",
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "luffy sp",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP12-001");
         assertDone();
       } finally {
         await app.close();

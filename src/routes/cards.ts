@@ -92,7 +92,12 @@ const NATURAL_LANGUAGE_RARITY_KEYWORDS: Record<string, string> = {
   uc: "UC",
   sr: "SR",
   sec: "SEC",
+};
+
+const NATURAL_LANGUAGE_VARIANT_KEYWORDS: Record<string, string> = {
   sp: "SP",
+  tr: "TR",
+  manga: "Manga Art",
 };
 
 function collectPositiveNameTerms(node: SearchNode): string[] {
@@ -114,7 +119,8 @@ function isNaturalLanguageExpansionNode(node: SearchNode): boolean {
   if (left.type !== "name" || left.negated || right.type !== "filter" || right.negated) return false;
   const keyword = left.value.toLowerCase();
   return (right.field === "type" && NATURAL_LANGUAGE_TYPE_KEYWORDS[keyword] === right.value)
-    || (right.field === "rarity" && NATURAL_LANGUAGE_RARITY_KEYWORDS[keyword] === right.value);
+    || (right.field === "rarity" && NATURAL_LANGUAGE_RARITY_KEYWORDS[keyword] === right.value)
+    || (right.field === "is" && NATURAL_LANGUAGE_VARIANT_KEYWORDS[keyword] !== undefined && right.value === keyword);
 }
 
 function collectPositiveFilterValues(node: SearchNode, field: string): string[] {
@@ -152,6 +158,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     let sequentialNameQuery = "";
     let typeBoostValues: string[] = [];
     let rarityBoostValues: string[] = [];
+    let variantBoostValues: string[] = [];
     const unique = qs.unique || "prints";
 
     const conditions: string[] = ["c.language = $1"];
@@ -227,6 +234,8 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         sequentialNameQuery = collectPositiveNameTerms(ast).join(" ").trim();
         typeBoostValues = uniqueStrings(collectPositiveFilterValues(ast, "type"));
         rarityBoostValues = uniqueStrings(collectPositiveFilterValues(ast, "rarity"));
+        variantBoostValues = uniqueStrings(collectPositiveFilterValues(ast, "is"))
+          .filter((value) => NATURAL_LANGUAGE_VARIANT_KEYWORDS[value.toLowerCase()] !== undefined);
         const compiled = compileSearch(ast, paramIdx, unique);
         if (compiled.sql) {
           conditions.push(compiled.sql);
@@ -262,7 +271,12 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     const where = conditions.join(" AND ");
     const needsPriceJoin = sortKey === "market_price";
     const useSearchRank = Boolean(qs.q)
-      && (Boolean(sequentialNameQuery) || typeBoostValues.length > 0 || rarityBoostValues.length > 0)
+      && (
+        Boolean(sequentialNameQuery)
+        || typeBoostValues.length > 0
+        || rarityBoostValues.length > 0
+        || variantBoostValues.length > 0
+      )
       && (wantsRelevanceSort || (!qs.sort && !inlineSortProvided));
 
     const filterParams = [...params];
@@ -316,6 +330,16 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       const rarityParam = `$${rowParamIdx++}`;
       rowParams.push(rarityValue);
       searchRankSql += ` + CASE WHEN c.rarity = ${rarityParam} THEN 100 ELSE 0 END`;
+      hasSearchRankComponent = true;
+    }
+
+    for (const variantValue of variantBoostValues) {
+      const variantParam = `$${rowParamIdx++}`;
+      rowParams.push(NATURAL_LANGUAGE_VARIANT_KEYWORDS[variantValue.toLowerCase()]);
+      searchRankSql += ` + CASE WHEN EXISTS (
+        SELECT 1 FROM card_images ci_variant_boost
+        WHERE ci_variant_boost.card_id = c.id AND ci_variant_boost.label = ${variantParam}
+      ) THEN 90 ELSE 0 END`;
       hasSearchRankComponent = true;
     }
     const relevanceActive = Boolean(useSearchRank && hasSearchRankComponent);

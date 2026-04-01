@@ -63,6 +63,12 @@ const NATURAL_LANGUAGE_RARITY_MAP: Record<string, string> = {
   sec: "SEC",
 };
 
+const NATURAL_LANGUAGE_VARIANT_MAP: Record<string, string> = {
+  sp: "SP",
+  tr: "TR",
+  manga: "Manga Art",
+};
+
 const FIELD_ALIASES: Record<string, string> = {
   n: "name",
   name: "name",
@@ -319,6 +325,23 @@ function rewriteStandaloneKeyword(
           field: "rarity",
           operator: ":",
           value: rarityValue,
+          negated: false,
+        },
+      ],
+    };
+  }
+
+  const variantValue = NATURAL_LANGUAGE_VARIANT_MAP[keyword];
+  if (variantValue) {
+    return {
+      type: "or",
+      children: [
+        node,
+        {
+          type: "filter",
+          field: "is",
+          operator: ":",
+          value: keyword,
           negated: false,
         },
       ],

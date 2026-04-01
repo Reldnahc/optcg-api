@@ -414,6 +414,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         runQuery<{ total: string }>(
           `SELECT COUNT(*) AS total
            FROM cards c
+           LEFT JOIN products p ON p.id = c.product_id
            JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true
            LEFT JOIN products ip ON ip.id = ci.product_id
            WHERE ${where}`,
@@ -469,6 +470,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       runQuery<{ total: string }>(
         `SELECT COUNT(*) AS total
          FROM cards c
+         LEFT JOIN products p ON p.id = c.product_id
          WHERE ${where}`,
         filterParams,
       ),

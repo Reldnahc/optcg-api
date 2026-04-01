@@ -13,6 +13,7 @@
  *   t:leader           → type = leader
  *   r:sr               → rarity = SR
  *   is:sp              → has an SP variant
+ *   has:sp             → card has any SP variant
  *   -c:red             → NOT color red
  *   A OR B             → disjunction
  *   (A B) OR C         → grouping

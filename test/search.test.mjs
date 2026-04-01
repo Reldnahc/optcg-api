@@ -330,6 +330,150 @@ const tests = [
     },
   },
   {
+    name: "route treats is:sp as a print-level variant filter",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$2/);
+            assert.doesNotMatch(sql, /ci_has/);
+            assert.equal(params[1], "SP");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$2/);
+            assert.equal(params[1], "SP");
+          },
+          result: {
+            rows: [
+              {
+                ...createCardRow({
+                  card_number: "OP13-001",
+                  name: "Monkey D. Luffy",
+                }),
+                image_url: "https://example.com/sp.png",
+                scan_url: null,
+                scan_thumb_url: null,
+                tcgplayer_url: null,
+                market_price: null,
+                low_price: null,
+                mid_price: null,
+                high_price: null,
+                label: "SP",
+                variant_index: 1,
+                variant_product_name: "Special Set",
+              },
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "is:sp",
+            limit: "5",
+            unique: "prints",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].label, "SP");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route treats has:sp as a card-level variant existence filter",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci_has\.label = \$2/);
+            assert.equal(params[1], "SP");
+          },
+          result: { rows: [{ total: "2" }] },
+        },
+        {
+          match: "JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci_has\.label = \$2/);
+            assert.equal(params[1], "SP");
+          },
+          result: {
+            rows: [
+              {
+                ...createCardRow({
+                  card_number: "OP13-001",
+                  name: "Monkey D. Luffy",
+                }),
+                image_url: "https://example.com/standard.png",
+                scan_url: null,
+                scan_thumb_url: null,
+                tcgplayer_url: null,
+                market_price: null,
+                low_price: null,
+                mid_price: null,
+                high_price: null,
+                label: "Standard",
+                variant_index: 0,
+                variant_product_name: "Base Set",
+              },
+              {
+                ...createCardRow({
+                  id: "card-2",
+                  card_number: "OP13-001",
+                  name: "Monkey D. Luffy",
+                }),
+                image_url: "https://example.com/sp.png",
+                scan_url: null,
+                scan_thumb_url: null,
+                tcgplayer_url: null,
+                market_price: null,
+                low_price: null,
+                mid_price: null,
+                high_price: null,
+                label: "SP",
+                variant_index: 1,
+                variant_product_name: "Special Set",
+              },
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "has:sp",
+            limit: "5",
+            unique: "prints",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data.length, 2);
+        assert.deepEqual(body.data.map((row) => row.label), ["Standard", "SP"]);
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
     name: "route treats variant words as variant boosts without dropping name matches",
     fn: async () => {
       const { app, assertDone } = await withCardsApp([
@@ -432,6 +576,14 @@ const tests = [
       const alternate = compileSearch(parseSearch("is:alternate"), 1, "cards");
       assert.match(alternate.sql, /ci\.label = \$1/);
       assert.deepEqual(alternate.params, ["Alternate Art"]);
+
+      const printSp = compileSearch(parseSearch("is:sp"), 1, "prints");
+      assert.equal(printSp.sql, "ci.label = $1");
+      assert.deepEqual(printSp.params, ["SP"]);
+
+      const hasSp = compileSearch(parseSearch("has:sp"), 1, "prints");
+      assert.match(hasSp.sql, /ci_has\.label = \$1/);
+      assert.deepEqual(hasSp.params, ["SP"]);
     },
   },
   {

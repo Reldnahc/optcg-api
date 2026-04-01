@@ -167,8 +167,8 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const inserted = await query<CardRow & { image_url: string | null }>(
         `WITH upserted_product AS (
            INSERT INTO products (language, name, source, set_codes, released_at, product_set_code)
-           SELECT $1, $2, 'bandai', $3::text[], $4, $5
-           WHERE $2 IS NOT NULL
+           SELECT $1, $2::text, 'bandai', $3::text[], $4, $5
+           WHERE $2::text IS NOT NULL
            ON CONFLICT (name, language) DO UPDATE SET
              set_codes = CASE
                WHEN products.set_codes IS NULL OR array_length(products.set_codes, 1) IS NULL OR array_length(products.set_codes, 1) = 0

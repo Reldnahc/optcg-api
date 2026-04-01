@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { labelOrder, thumbnailUrl, setName } from "../format.js";
-import { formatBlockIsLegalSql } from "../formatLegality.js";
+import { formatBlockAllowedSql } from "../formatLegality.js";
 import { prerenderManifestRouteSchema } from "../schemas/public.js";
 
 type RenderGroup =
@@ -406,7 +406,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
       query<CardLegalityRow>(
         `SELECT c.id AS card_id,
                 f.name AS format_name,
-                COALESCE(BOOL_AND(${formatBlockIsLegalSql("flb")}), false) AS legal
+                COALESCE(BOOL_AND(${formatBlockAllowedSql("flb", "f")}), false) AS legal
          FROM cards c
          CROSS JOIN formats f
          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = c.block
@@ -477,7 +477,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
       ),
       query<FormatSummaryRow>(
         `SELECT f.id, f.name, f.description, f.has_rotation,
-                COUNT(DISTINCT flb.id) FILTER (WHERE ${formatBlockIsLegalSql("flb")}) AS legal_blocks,
+                COUNT(DISTINCT flb.id) FILTER (WHERE ${formatBlockAllowedSql("flb", "f")}) AS legal_blocks,
                 COUNT(DISTINCT fb.id) FILTER (WHERE fb.unbanned_at IS NULL) AS ban_count
          FROM formats f
          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id
@@ -486,8 +486,9 @@ export async function prerenderRoutes(app: FastifyInstance) {
          ORDER BY f.name ASC`,
       ),
       query<FormatBlockRow>(
-        `SELECT format_id, block, ${formatBlockIsLegalSql("format_legal_blocks")} AS legal, rotated_at
-         FROM format_legal_blocks
+        `SELECT flb.format_id, flb.block, ${formatBlockAllowedSql("flb", "f")} AS legal, flb.rotated_at
+         FROM format_legal_blocks flb
+         JOIN formats f ON f.id = flb.format_id
          ORDER BY format_id ASC, block ASC`,
       ),
       query<FormatBanRow>(

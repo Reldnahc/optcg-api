@@ -1,12 +1,20 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { formatBlockIsLegalSql } from "../formatLegality.js";
+import { formatBlockAllowedSql } from "../formatLegality.js";
 import { formatDetailRouteSchema, formatsListRouteSchema } from "../schemas/public.js";
 
-export async function formatsRoutes(app: FastifyInstance) {
+type QueryExecutor = typeof query;
+
+type FormatsRoutesOptions = {
+  queryExecutor?: QueryExecutor;
+};
+
+export async function formatsRoutes(app: FastifyInstance, options: FormatsRoutesOptions = {}) {
+  const runQuery = options.queryExecutor ?? query;
+
   // GET /v1/formats
   app.get("/formats", { schema: formatsListRouteSchema }, async (_req, reply) => {
-    const rows = await query<{
+    const rows = await runQuery<{
       id: string;
       name: string;
       description: string | null;
@@ -15,7 +23,7 @@ export async function formatsRoutes(app: FastifyInstance) {
       ban_count: string;
     }>(
       `SELECT f.id, f.name, f.description, f.has_rotation,
-              COUNT(DISTINCT flb.id) FILTER (WHERE ${formatBlockIsLegalSql("flb")}) AS legal_blocks,
+              COUNT(DISTINCT flb.id) FILTER (WHERE ${formatBlockAllowedSql("flb", "f")}) AS legal_blocks,
               COUNT(DISTINCT fb.id) FILTER (WHERE fb.unbanned_at IS NULL) AS ban_count
        FROM formats f
        LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id
@@ -39,7 +47,7 @@ export async function formatsRoutes(app: FastifyInstance) {
   app.get("/formats/:format_name", { schema: formatDetailRouteSchema }, async (req, reply) => {
     const { format_name } = req.params as { format_name: string };
 
-    const formatResult = await query<{
+    const formatResult = await runQuery<{
       id: string;
       name: string;
       description: string | null;
@@ -57,18 +65,20 @@ export async function formatsRoutes(app: FastifyInstance) {
 
     const format = formatResult.rows[0];
 
-    const blocks = await query<{
+    const blocks = await runQuery<{
       block: string;
       legal: boolean;
       rotated_at: string | null;
     }>(
-      `SELECT block, ${formatBlockIsLegalSql("format_legal_blocks")} AS legal, rotated_at
-       FROM format_legal_blocks WHERE format_id = $1
+      `SELECT flb.block, ${formatBlockAllowedSql("flb", "f")} AS legal, flb.rotated_at
+       FROM format_legal_blocks flb
+       JOIN formats f ON f.id = flb.format_id
+       WHERE flb.format_id = $1
        ORDER BY block`,
       [format.id],
     );
 
-    const bans = await query<{
+    const bans = await runQuery<{
       card_number: string;
       ban_type: string;
       max_copies: number | null;

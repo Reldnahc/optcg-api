@@ -74,6 +74,13 @@ const tests = [
     },
   },
   {
+    name: "legal filter ignores rotation dates for non-rotating formats",
+    fn: () => {
+      const compiled = compileSearch(parseSearch('legal:"Extra Regulation"'), 1);
+      assert.match(compiled.sql, /COALESCE\(f\.has_rotation, true\) = false OR/);
+    },
+  },
+  {
     name: "parser rewrites standalone type words in multi-term searches",
     fn: () => {
       const ast = parseSearch("luffy leader");

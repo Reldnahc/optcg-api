@@ -2,6 +2,10 @@ export function formatBlockIsLegalSql(alias: string): string {
   return `(${alias}.rotated_at IS NULL OR ${alias}.rotated_at > CURRENT_TIMESTAMP)`;
 }
 
+export function formatBlockAllowedSql(blockAlias: string, formatAlias: string): string {
+  return `(COALESCE(${formatAlias}.has_rotation, true) = false OR ${formatBlockIsLegalSql(blockAlias)})`;
+}
+
 export function deriveFormatBlockLegal(rotatedAt: string | null, now: Date = new Date()): boolean {
   if (!rotatedAt) return true;
 

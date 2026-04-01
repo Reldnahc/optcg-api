@@ -1,6 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { formatBlockIsLegalSql, resolveFormatBlockRotationInput } from "../formatLegality.js";
+import { formatBlockAllowedSql, resolveFormatBlockRotationInput } from "../formatLegality.js";
 import {
   adminCreateFormatBanRouteSchema,
   adminDeleteFormatBanRouteSchema,
@@ -103,8 +103,9 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
         legal: boolean;
         rotated_at: string | null;
       }>(
-        `SELECT id, format_id, block, ${formatBlockIsLegalSql("format_legal_blocks")} AS legal, rotated_at
-         FROM format_legal_blocks
+        `SELECT flb.id, flb.format_id, flb.block, ${formatBlockAllowedSql("flb", "f")} AS legal, flb.rotated_at
+         FROM format_legal_blocks flb
+         JOIN formats f ON f.id = flb.format_id
          ORDER BY block`,
       ),
       query<FormatBanRow>(

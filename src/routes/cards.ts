@@ -414,7 +414,6 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         runQuery<{ total: string }>(
           `SELECT COUNT(*) AS total
            FROM cards c
-           JOIN products p ON p.id = c.product_id
            JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true
            LEFT JOIN products ip ON ip.id = ci.product_id
            WHERE ${where}`,
@@ -440,7 +439,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
                   ci.artist,
                   ip.name AS variant_product_name
            FROM cards c
-           JOIN products p ON p.id = c.product_id
+           LEFT JOIN products p ON p.id = c.product_id
            JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true
            LEFT JOIN products ip ON ip.id = ci.product_id
            ${variantPriceJoin}
@@ -470,7 +469,6 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       runQuery<{ total: string }>(
         `SELECT COUNT(*) AS total
          FROM cards c
-         JOIN products p ON p.id = c.product_id
          WHERE ${where}`,
         filterParams,
       ),
@@ -490,7 +488,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
                 ${bestScanThumbSubquery("c.id")} AS scan_thumb_url,
                 latest_price.tcgplayer_url, latest_price.market_price, latest_price.low_price, latest_price.mid_price, latest_price.high_price
          FROM cards c
-         JOIN products p ON p.id = c.product_id
+         LEFT JOIN products p ON p.id = c.product_id
          ${cardPriceJoin}
          WHERE ${where}
          ORDER BY ${primaryOrderSql}, c.card_number ASC
@@ -574,7 +572,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     const cardResult = await runQuery<CardRow>(
       `SELECT c.*, p.name AS product_name, p.released_at
        FROM cards c
-       JOIN products p ON p.id = c.product_id
+       LEFT JOIN products p ON p.id = c.product_id
        WHERE c.card_number ILIKE $1 AND c.language = $2
        LIMIT 1`,
       [card_number, lang],
@@ -602,7 +600,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
                WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
                LIMIT 1) AS set_product_name
        FROM cards c
-       JOIN products p ON p.id = c.product_id
+       LEFT JOIN products p ON p.id = c.product_id
        WHERE c.card_number ILIKE $1 AND c.language = $2
        LIMIT 1`,
       [card_number, lang],

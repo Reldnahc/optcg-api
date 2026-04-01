@@ -149,7 +149,7 @@ export interface CardRow {
   id: string;
   card_number: string;
   language: string;
-  product_id: string;
+  product_id: string | null;
   true_set_code: string;
   name: string;
   card_type: string;
@@ -164,7 +164,7 @@ export interface CardRow {
   effect: string | null;
   trigger: string | null;
   block: string | null;
-  product_name: string;
+  product_name: string | null;
   released_at: string | null;
 }
 

@@ -38,7 +38,7 @@ interface CardBaseRow {
   effect: string | null;
   trigger: string | null;
   block: string | null;
-  product_name: string;
+  product_name: string | null;
   released_at: string | null;
   set_product_name: string | null;
 }
@@ -344,14 +344,14 @@ export async function prerenderRoutes(app: FastifyInstance) {
       scansOverallResult,
     ] = await Promise.all([
       query<CardBaseRow>(
-        `SELECT c.id, c.card_number, c.language, c.true_set_code, c.name, c.card_type, c.rarity, c.color,
+         `SELECT c.id, c.card_number, c.language, c.true_set_code, c.name, c.card_type, c.rarity, c.color,
                 c.cost, c.power, c.counter, c.life, c.attribute, c.types, c.effect, c.trigger, c.block,
                 p.name AS product_name, p.released_at,
                 (SELECT p2.name FROM products p2
                  WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
                  LIMIT 1) AS set_product_name
          FROM cards c
-         JOIN products p ON p.id = c.product_id
+         LEFT JOIN products p ON p.id = c.product_id
          WHERE c.language = 'en'
          ORDER BY c.card_number ASC`,
       ),
@@ -428,14 +428,14 @@ export async function prerenderRoutes(app: FastifyInstance) {
          GROUP BY card_number`,
       ),
       query<SetSummaryRow>(
-        `SELECT c.true_set_code,
+         `SELECT c.true_set_code,
                 (SELECT p2.name FROM products p2
                  WHERE p2.language = 'en' AND p2.set_codes[1] = c.true_set_code
                  LIMIT 1) AS product_name,
                 MIN(p.released_at) AS released_at,
                 COUNT(*) AS card_count
          FROM cards c
-         JOIN products p ON p.id = c.product_id
+         LEFT JOIN products p ON p.id = c.product_id
          WHERE c.language = 'en'
          GROUP BY c.true_set_code
          ORDER BY c.true_set_code ASC`,

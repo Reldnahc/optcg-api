@@ -50,7 +50,7 @@ export async function randomRoute(app: FastifyInstance) {
     const row = await query<CardRow>(
       `SELECT c.*, p.name AS product_name, p.released_at
        FROM cards c
-       JOIN products p ON p.id = c.product_id
+       LEFT JOIN products p ON p.id = c.product_id
        WHERE ${where}
        ORDER BY RANDOM()
        LIMIT 1`,

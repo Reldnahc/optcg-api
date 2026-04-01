@@ -81,7 +81,7 @@ async function getCardRecord(cardNumber: string, language: string) {
     `SELECT c.*, p.name AS product_name, p.released_at,
             ${bestImageSubquery("c.id")} AS image_url
      FROM cards c
-     JOIN products p ON p.id = c.product_id
+     LEFT JOIN products p ON p.id = c.product_id
      WHERE c.card_number ILIKE $1 AND c.language = $2
      LIMIT 1`,
     [cardNumber, language],
@@ -126,8 +126,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const name = asOptionalString(body.name, "name");
       if (!name) throw new Error("name is required");
 
-      const productName = asOptionalString(body.product_name, "product_name");
-      if (!productName) throw new Error("product_name is required");
+      const productName = asOptionalString(body.product_name, "product_name") ?? null;
 
       const trueSetCodeInput = asOptionalString(body.true_set_code, "true_set_code");
       const derivedSetCode = deriveSetCodeFromCardNumber(normalizedCardNumber);
@@ -168,7 +167,8 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const inserted = await query<CardRow & { image_url: string | null }>(
         `WITH upserted_product AS (
            INSERT INTO products (language, name, source, set_codes, released_at, product_set_code)
-           VALUES ($1, $2, 'bandai', $3::text[], $4, $5)
+           SELECT $1, $2, 'bandai', $3::text[], $4, $5
+           WHERE $2 IS NOT NULL
            ON CONFLICT (name, language) DO UPDATE SET
              set_codes = CASE
                WHEN products.set_codes IS NULL OR array_length(products.set_codes, 1) IS NULL OR array_length(products.set_codes, 1) = 0
@@ -184,21 +184,22 @@ export async function adminCardsRoutes(app: FastifyInstance) {
              card_number, language, product_id, true_set_code, name, card_type, rarity, color,
              cost, power, counter, life, attribute, types, effect, trigger, block, artist, manually_added
            )
-           SELECT
-             $6, $1, upserted_product.id, $7, $8, $9, $10, $11::text[],
+           VALUES (
+             $6, $1, (SELECT id FROM upserted_product LIMIT 1), $7, $8, $9, $10, $11::text[],
              $12, $13, $14, $15, $16::text[], $17::text[], $18, $19, $20, $21, true
-           FROM upserted_product
+           )
            RETURNING *
          ),
          inserted_source AS (
            INSERT INTO card_sources (card_id, product_id)
-           SELECT inserted_card.id, inserted_card.product_id
+           SELECT inserted_card.id, upserted_product.id
            FROM inserted_card
+           JOIN upserted_product ON true
            ON CONFLICT (card_id, product_id) DO NOTHING
          )
          SELECT inserted_card.*, upserted_product.name AS product_name, upserted_product.released_at, NULL::text AS image_url
          FROM inserted_card
-         JOIN upserted_product ON upserted_product.id = inserted_card.product_id`,
+         LEFT JOIN upserted_product ON upserted_product.id = inserted_card.product_id`,
         [
           language,
           productName,
@@ -288,7 +289,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
                 ${bestImageSubquery("c.id")} AS image_url,
                 (SELECT COUNT(*) FROM card_images ci WHERE ci.card_id = c.id) AS image_count
          FROM cards c
-         JOIN products p ON p.id = c.product_id
+         LEFT JOIN products p ON p.id = c.product_id
          WHERE ${where}
          ORDER BY p.released_at DESC NULLS LAST, c.card_number ASC
          LIMIT $${idx} OFFSET $${idx + 1}`,
@@ -318,7 +319,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
                WHERE p2.language = c.language AND p2.set_codes[1] = c.true_set_code
                LIMIT 1) AS set_product_name
        FROM cards c
-       JOIN products p ON p.id = c.product_id
+       LEFT JOIN products p ON p.id = c.product_id
        WHERE c.card_number ILIKE $1 AND c.language = $2
        LIMIT 1`,
       [card_number, language],
@@ -665,7 +666,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
        SELECT updated.*, p.name AS product_name, p.released_at,
               ${bestImageSubquery("updated.id")} AS image_url
        FROM updated
-       JOIN products p ON p.id = updated.product_id`,
+       LEFT JOIN products p ON p.id = updated.product_id`,
       params,
     );
 

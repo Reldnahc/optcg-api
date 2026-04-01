@@ -62,7 +62,7 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
               MIN(p.released_at) AS released_at,
               COUNT(*) AS card_count
        FROM cards c
-       JOIN products p ON p.id = c.product_id
+       LEFT JOIN products p ON p.id = c.product_id
        WHERE c.language = 'en'
        GROUP BY c.true_set_code
        ORDER BY ${sortSql} ${order.toUpperCase()}${nullsSql}, c.true_set_code ASC`,

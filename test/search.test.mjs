@@ -74,6 +74,64 @@ const tests = [
     },
   },
   {
+    name: "parser rewrites standalone type words in multi-term searches",
+    fn: () => {
+      const ast = parseSearch("luffy leader");
+      assert.equal(ast.type, "and");
+      assert.deepEqual(ast.children, [
+        { type: "name", value: "luffy", negated: false },
+        {
+          type: "or",
+          children: [
+            { type: "name", value: "leader", negated: false },
+            { type: "filter", field: "type", operator: ":", value: "Leader", negated: false },
+          ],
+        },
+      ]);
+    },
+  },
+  {
+    name: "parser keeps standalone type words literal when searched alone",
+    fn: () => {
+      const ast = parseSearch("leader");
+      assert.deepEqual(ast, { type: "name", value: "leader", negated: false });
+    },
+  },
+  {
+    name: "parser rewrites standalone rarity acronyms in multi-term searches",
+    fn: () => {
+      const ast = parseSearch("sec luffy");
+      assert.equal(ast.type, "and");
+      assert.deepEqual(ast.children, [
+        {
+          type: "or",
+          children: [
+            { type: "name", value: "sec", negated: false },
+            { type: "filter", field: "rarity", operator: ":", value: "SEC", negated: false },
+          ],
+        },
+        { type: "name", value: "luffy", negated: false },
+      ]);
+    },
+  },
+  {
+    name: "parser rewrites standalone variant words in multi-term searches",
+    fn: () => {
+      const ast = parseSearch("luffy manga");
+      assert.equal(ast.type, "and");
+      assert.deepEqual(ast.children, [
+        { type: "name", value: "luffy", negated: false },
+        {
+          type: "or",
+          children: [
+            { type: "name", value: "manga", negated: false },
+            { type: "filter", field: "is", operator: ":", value: "manga", negated: false },
+          ],
+        },
+      ]);
+    },
+  },
+  {
     name: "route matches card names containing literal Not",
     fn: async () => {
       const { app, assertDone } = await withCardsApp([
@@ -118,6 +176,211 @@ const tests = [
     },
   },
   {
+    name: "route treats standalone type words as type filters in multi-term searches",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.card_type ILIKE \$8/);
+            assert.equal(params[7], "Leader");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.card_type ILIKE \$8/);
+            assert.match(sql, /CASE WHEN c\.card_type ILIKE \$16 THEN 120 ELSE 0 END/);
+            assert.match(sql, /ORDER BY CASE/);
+            assert.equal(params[7], "Leader");
+            assert.equal(params[15], "Leader");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP09-001",
+                name: "Monkey D. Luffy",
+                card_type: "Leader",
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "luffy leader",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_type, "Leader");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route treats rarity acronyms as rarity boosts without dropping name matches",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.rarity = \$5/);
+            assert.equal(params[4], "SEC");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /c\.rarity = \$5/);
+            assert.match(sql, /CASE WHEN c\.rarity = \$16 THEN 100 ELSE 0 END/);
+            assert.equal(params[4], "SEC");
+            assert.equal(params[15], "SEC");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP10-119",
+                name: "Monkey D. Luffy",
+                rarity: "SEC",
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "sec luffy",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].rarity, "SEC");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route supports explicit variant label filters",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$2/);
+            assert.equal(params[1], "Alternate Art");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$2/);
+            assert.equal(params[1], "Alternate Art");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP11-118",
+                name: "Monkey D. Luffy",
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "is:alternate",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP11-118");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
+    name: "route treats variant words as variant boosts without dropping name matches",
+    fn: async () => {
+      const { app, assertDone } = await withCardsApp([
+        {
+          match: "SELECT COUNT(*) AS total",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$8/);
+            assert.equal(params[7], "SP");
+          },
+          result: { rows: [{ total: "1" }] },
+        },
+        {
+          match: "SELECT c.*, p.name AS product_name, p.released_at",
+          assert: ({ sql, params }) => {
+            assert.match(sql, /ci\.label = \$8/);
+            assert.match(sql, /ci_variant_boost\.label = \$16/);
+            assert.equal(params[7], "SP");
+            assert.equal(params[15], "SP");
+          },
+          result: {
+            rows: [
+              createCardRow({
+                card_number: "OP12-001",
+                name: "Monkey D. Luffy",
+              }),
+            ],
+          },
+        },
+      ]);
+
+      try {
+        const response = await app.inject({
+          method: "GET",
+          url: "/v1/cards",
+          query: {
+            q: "luffy sp",
+            limit: "5",
+            unique: "cards",
+          },
+        });
+
+        assert.equal(response.statusCode, 200);
+        const body = response.json();
+        assert.equal(body.data[0].card_number, "OP12-001");
+        assertDone();
+      } finally {
+        await app.close();
+      }
+    },
+  },
+  {
     name: "compiler supports exact card name search",
     fn: () => {
       const compiled = compileSearch(parseSearch('name="Monkey D. Luffy"'), 1, "cards");
@@ -149,6 +412,26 @@ const tests = [
       assert.match(compiled.sql, /flb\.rotated_at IS NULL OR flb\.rotated_at > CURRENT_TIMESTAMP/);
       assert.doesNotMatch(compiled.sql, /flb\.legal = true/);
       assert.deepEqual(compiled.params, ["standard"]);
+    },
+  },
+  {
+    name: "compiler supports explicit variant label filters",
+    fn: () => {
+      const sp = compileSearch(parseSearch("is:sp"), 1, "cards");
+      assert.match(sp.sql, /ci\.label = \$1/);
+      assert.deepEqual(sp.params, ["SP"]);
+
+      const manga = compileSearch(parseSearch("is:manga"), 1, "cards");
+      assert.match(manga.sql, /ci\.label = \$1/);
+      assert.deepEqual(manga.params, ["Manga Art"]);
+
+      const fullArt = compileSearch(parseSearch("is:full_art"), 1, "cards");
+      assert.match(fullArt.sql, /ci\.label = \$1/);
+      assert.deepEqual(fullArt.params, ["Full Art"]);
+
+      const alternate = compileSearch(parseSearch("is:alternate"), 1, "cards");
+      assert.match(alternate.sql, /ci\.label = \$1/);
+      assert.deepEqual(alternate.params, ["Alternate Art"]);
     },
   },
   {

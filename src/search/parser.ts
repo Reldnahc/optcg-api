@@ -12,6 +12,7 @@
  *   cost>=5            → cost >= 5
  *   t:leader           → type = leader
  *   r:sr               → rarity = SR
+ *   is:sp              → has an SP variant
  *   -c:red             → NOT color red
  *   A OR B             → disjunction
  *   (A B) OR C         → grouping
@@ -44,6 +45,29 @@ export interface OrNode {
 }
 
 export type SearchNode = FilterNode | NameNode | AndNode | OrNode;
+
+const NATURAL_LANGUAGE_TYPE_MAP: Record<string, string> = {
+  leader: "Leader",
+  leaders: "Leader",
+  character: "Character",
+  characters: "Character",
+  event: "Event",
+  events: "Event",
+  stage: "Stage",
+  stages: "Stage",
+};
+
+const NATURAL_LANGUAGE_RARITY_MAP: Record<string, string> = {
+  uc: "UC",
+  sr: "SR",
+  sec: "SEC",
+};
+
+const NATURAL_LANGUAGE_VARIANT_MAP: Record<string, string> = {
+  sp: "SP",
+  tr: "TR",
+  manga: "Manga Art",
+};
 
 const FIELD_ALIASES: Record<string, string> = {
   n: "name",
@@ -95,7 +119,7 @@ const IMPLICIT_SET_CODE_PATTERN = /^(?:OP\d{2}|ST\d{2}|EB\d{2}|PRB\d{2}|P\d{2,3}
 export function parseSearch(input: string): SearchNode {
   const tokens = tokenize(input);
   const result = parseOr(tokens, 0);
-  return result.node;
+  return rewriteNaturalLanguage(result.node);
 }
 
 interface ParseResult {
@@ -240,6 +264,97 @@ function negate(node: SearchNode) {
   } else if (node.type === "or") {
     for (const child of node.children) negate(child);
   }
+}
+
+function rewriteNaturalLanguage(node: SearchNode): SearchNode {
+  if (node.type === "and") {
+    const rewrittenChildren = node.children.map(rewriteNaturalLanguage);
+    return {
+      type: "and",
+      children: rewrittenChildren.map((child, index) => rewriteStandaloneKeyword(child, rewrittenChildren, index)),
+    };
+  }
+
+  if (node.type === "or") {
+    return {
+      type: "or",
+      children: node.children.map(rewriteNaturalLanguage),
+    };
+  }
+
+  return node;
+}
+
+function rewriteStandaloneKeyword(
+  node: SearchNode,
+  siblings: SearchNode[],
+  index: number,
+): SearchNode {
+  if (node.type !== "name") return node;
+  if (node.negated) return node;
+  if (!siblings.some((sibling, siblingIndex) => siblingIndex !== index && isMeaningfulSearchTerm(sibling))) {
+    return node;
+  }
+
+  const keyword = node.value.toLowerCase();
+  const typeValue = NATURAL_LANGUAGE_TYPE_MAP[keyword];
+  if (typeValue) {
+    return {
+      type: "or",
+      children: [
+        node,
+        {
+          type: "filter",
+          field: "type",
+          operator: ":",
+          value: typeValue,
+          negated: false,
+        },
+      ],
+    };
+  }
+
+  const rarityValue = NATURAL_LANGUAGE_RARITY_MAP[keyword];
+  if (rarityValue) {
+    return {
+      type: "or",
+      children: [
+        node,
+        {
+          type: "filter",
+          field: "rarity",
+          operator: ":",
+          value: rarityValue,
+          negated: false,
+        },
+      ],
+    };
+  }
+
+  const variantValue = NATURAL_LANGUAGE_VARIANT_MAP[keyword];
+  if (variantValue) {
+    return {
+      type: "or",
+      children: [
+        node,
+        {
+          type: "filter",
+          field: "is",
+          operator: ":",
+          value: keyword,
+          negated: false,
+        },
+      ],
+    };
+  }
+
+  return node;
+}
+
+function isMeaningfulSearchTerm(node: SearchNode): boolean {
+  if (node.type === "name") return true;
+  if (node.type === "filter") return node.field !== "order" && node.field !== "direction";
+  return true;
 }
 
 function tokenize(input: string): string[] {

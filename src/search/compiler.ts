@@ -23,6 +23,19 @@ const RARITY_MAP: Record<string, string> = {
   sec: "SEC",
 };
 
+const VARIANT_LABEL_MAP: Record<string, string> = {
+  sp: "SP",
+  tr: "TR",
+  manga: "Manga Art",
+  manga_art: "Manga Art",
+  fullart: "Full Art",
+  full_art: "Full Art",
+  alternate: "Alternate Art",
+  alt: "Alternate Art",
+  alternate_art: "Alternate Art",
+  alt_art: "Alternate Art",
+};
+
 export function compileSearch(
   node: SearchNode,
   startIdx: number,
@@ -383,6 +396,23 @@ function compileFilter(
             : `EXISTS (SELECT 1 FROM cards c2 WHERE c2.card_number = c.card_number AND c2.language = c.language AND c2.id != c.id AND c2.created_at < c.created_at)`;
         case "multicolor": {
           const sql = `array_length(c.color, 1) > 1`;
+          return negated ? `NOT (${sql})` : sql;
+        }
+        case "sp":
+        case "tr":
+        case "manga":
+        case "manga_art":
+        case "fullart":
+        case "full_art":
+        case "alternate":
+        case "alt":
+        case "alternate_art":
+        case "alt_art": {
+          const p = param(ctx, VARIANT_LABEL_MAP[value.toLowerCase()]);
+          const sql = `EXISTS (
+            SELECT 1 FROM card_images ci
+            WHERE ci.card_id = c.id AND ci.label = ${p}
+          )`;
           return negated ? `NOT (${sql})` : sql;
         }
         case "vanilla": {

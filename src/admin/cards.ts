@@ -56,16 +56,24 @@ function asOptionalStringArray(
     throw new Error(`${field} must be an array of strings`);
   }
 
-  const normalized = value
+  const trimmed = value
     .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => item.charAt(0).toUpperCase() + item.slice(1).toLowerCase());
+    .filter(Boolean);
+
+  const normalized = allowedValues
+    ? trimmed.map((item) => item.charAt(0).toUpperCase() + item.slice(1).toLowerCase())
+    : trimmed;
 
   if (allowedValues && normalized.some((item) => !allowedValues.has(item))) {
     throw new Error(`Invalid ${field}`);
   }
 
   return normalized;
+}
+
+function deriveSetCodeFromCardNumber(cardNumber: string): string | null {
+  const match = cardNumber.match(/^([A-Z0-9]+)-/);
+  return match ? match[1] : null;
 }
 
 async function getCardRecord(cardNumber: string, language: string) {
@@ -99,6 +107,136 @@ async function getCardImageRecord(cardId: string, variantIndex: number) {
 }
 
 export async function adminCardsRoutes(app: FastifyInstance) {
+  app.post("/cards", async (req, reply) => {
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    try {
+      const cardNumber = asOptionalString(body.card_number, "card_number");
+      if (!cardNumber) throw new Error("card_number is required");
+      const normalizedCardNumber = cardNumber.toUpperCase();
+
+      const existing = await getCardRecord(normalizedCardNumber, language);
+      if (existing) {
+        reply.code(409);
+        return { error: { status: 409, message: "Card already exists" } };
+      }
+
+      const name = asOptionalString(body.name, "name");
+      if (!name) throw new Error("name is required");
+
+      const productName = asOptionalString(body.product_name, "product_name");
+      if (!productName) throw new Error("product_name is required");
+
+      const trueSetCodeInput = asOptionalString(body.true_set_code, "true_set_code");
+      const derivedSetCode = deriveSetCodeFromCardNumber(normalizedCardNumber);
+      const trueSetCode = (trueSetCodeInput || derivedSetCode)?.toUpperCase() ?? null;
+      if (!trueSetCode) throw new Error("true_set_code is required");
+
+      const productSetCode = (asOptionalString(body.product_set_code, "product_set_code") || trueSetCode).toUpperCase();
+
+      const cardType = asOptionalString(body.card_type, "card_type");
+      if (!cardType) throw new Error("card_type is required");
+      if (!CARD_TYPES.has(cardType)) throw new Error("Invalid card_type");
+
+      const color = asOptionalStringArray(body.color, "color", COLORS);
+      if (!color || color.length === 0) throw new Error("color must include at least one value");
+
+      const types = asOptionalStringArray(body.types, "types");
+      if (!types || types.length === 0) throw new Error("types must include at least one value");
+
+      const rarityValue = body.rarity;
+      let rarity: string | null = null;
+      if (rarityValue !== undefined && rarityValue !== null && rarityValue !== "") {
+        if (typeof rarityValue !== "string") throw new Error("rarity must be a string");
+        rarity = normalizeCardRarity(rarityValue);
+        if (!rarity) throw new Error(`Invalid rarity: ${rarityValue}`);
+      }
+
+      const cost = asOptionalNumber(body.cost, "cost") ?? null;
+      const power = asOptionalNumber(body.power, "power") ?? null;
+      const counter = asOptionalNumber(body.counter, "counter") ?? null;
+      const life = asOptionalNumber(body.life, "life") ?? null;
+      const attribute = asOptionalStringArray(body.attribute, "attribute", ATTRIBUTES) ?? null;
+      const effect = asOptionalString(body.effect, "effect") ?? null;
+      const trigger = asOptionalString(body.trigger, "trigger") ?? null;
+      const block = asOptionalString(body.block, "block") ?? null;
+      const artist = asOptionalString(body.artist, "artist") ?? null;
+      const productReleasedAt = asOptionalDateString(body.product_released_at, "product_released_at") ?? null;
+
+      const inserted = await query<CardRow & { image_url: string | null }>(
+        `WITH upserted_product AS (
+           INSERT INTO products (language, name, source, set_codes, released_at, product_set_code)
+           VALUES ($1, $2, 'bandai', $3::text[], $4, $5)
+           ON CONFLICT (name, language) DO UPDATE SET
+             set_codes = CASE
+               WHEN products.set_codes IS NULL OR array_length(products.set_codes, 1) IS NULL OR array_length(products.set_codes, 1) = 0
+                 THEN EXCLUDED.set_codes
+               ELSE products.set_codes
+             END,
+             released_at = COALESCE(products.released_at, EXCLUDED.released_at),
+             product_set_code = COALESCE(products.product_set_code, EXCLUDED.product_set_code)
+           RETURNING id, name, released_at
+         ),
+         inserted_card AS (
+           INSERT INTO cards (
+             card_number, language, product_id, true_set_code, name, card_type, rarity, color,
+             cost, power, counter, life, attribute, types, effect, trigger, block, artist
+           )
+           SELECT
+             $6, $1, upserted_product.id, $7, $8, $9, $10, $11::text[],
+             $12, $13, $14, $15, $16::text[], $17::text[], $18, $19, $20, $21
+           FROM upserted_product
+           RETURNING *
+         ),
+         inserted_source AS (
+           INSERT INTO card_sources (card_id, product_id)
+           SELECT inserted_card.id, inserted_card.product_id
+           FROM inserted_card
+           ON CONFLICT (card_id, product_id) DO NOTHING
+         )
+         SELECT inserted_card.*, upserted_product.name AS product_name, upserted_product.released_at, NULL::text AS image_url
+         FROM inserted_card
+         JOIN upserted_product ON upserted_product.id = inserted_card.product_id`,
+        [
+          language,
+          productName,
+          [trueSetCode],
+          productReleasedAt,
+          productSetCode,
+          normalizedCardNumber,
+          trueSetCode,
+          name,
+          cardType,
+          rarity,
+          color,
+          cost,
+          power,
+          counter,
+          life,
+          attribute,
+          types,
+          effect,
+          trigger,
+          block,
+          artist,
+        ],
+      );
+
+      return {
+        data: {
+          card_number: inserted.rows[0].card_number,
+          language: inserted.rows[0].language,
+        },
+      };
+    } catch (error: any) {
+      if (reply.sent) return;
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    }
+  });
+
   app.get("/cards", async (req, reply) => {
     const qs = req.query as Record<string, string>;
     const page = Math.max(1, parseInt(qs.page || "1", 10));

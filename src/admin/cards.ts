@@ -160,7 +160,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const attribute = asOptionalStringArray(body.attribute, "attribute", ATTRIBUTES) ?? null;
       const effect = asOptionalString(body.effect, "effect") ?? null;
       const trigger = asOptionalString(body.trigger, "trigger") ?? null;
-      const block = asOptionalString(body.block, "block") ?? null;
+      const block = asOptionalString(body.block, "block") ?? "5";
       const artist = asOptionalString(body.artist, "artist") ?? null;
       const productReleasedAt = asOptionalDateString(body.product_released_at, "product_released_at") ?? null;
 

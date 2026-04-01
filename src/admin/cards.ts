@@ -807,6 +807,70 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     };
   });
 
+  app.delete("/cards/:card_number", async (req, reply) => {
+    const { card_number } = req.params as { card_number: string };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+
+    const card = await getCardRecord(card_number, language);
+    if (!card) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    const imageIds = await query<{ id: string }>(
+      `SELECT id
+       FROM card_images
+       WHERE card_id = $1`,
+      [card.id],
+    );
+
+    const ids = imageIds.rows.map((row) => row.id);
+
+    if (ids.length > 0) {
+      await query(
+        `UPDATE tcgplayer_products
+         SET card_image_id = NULL
+         WHERE card_image_id = ANY($1::uuid[])`,
+        [ids],
+      );
+
+      await query(
+        `UPDATE scan_batch_items
+         SET linked_card_image_id = NULL
+         WHERE linked_card_image_id = ANY($1::uuid[])`,
+        [ids],
+      );
+    }
+
+    await query(
+      `UPDATE scan_batch_items
+       SET linked_card_id = NULL
+       WHERE linked_card_id = $1`,
+      [card.id],
+    );
+
+    await query(
+      `DELETE FROM card_images
+       WHERE card_id = $1`,
+      [card.id],
+    );
+
+    await query(
+      `DELETE FROM card_sources
+       WHERE card_id = $1`,
+      [card.id],
+    );
+
+    await query(
+      `DELETE FROM cards
+       WHERE id = $1`,
+      [card.id],
+    );
+
+    return { ok: true };
+  });
+
   app.delete("/cards/:card_number/images/:variant_index", async (req, reply) => {
     const { card_number, variant_index } = req.params as { card_number: string; variant_index: string };
     const qs = req.query as Record<string, string>;
@@ -1099,12 +1163,13 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         artist: string | null;
         label: string | null;
         classified: boolean;
+        manually_added: boolean;
       }>(
         `INSERT INTO card_images (
-           card_id, product_id, variant_index, image_url, source_url, scan_url, artist, label, classified
+           card_id, product_id, variant_index, image_url, source_url, scan_url, artist, label, classified, manually_added
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, label, classified`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+         RETURNING id, card_id, product_id, variant_index, image_url, source_url, scan_url, artist, label, classified, manually_added`,
         [card.id, productId, variantIndex, imageUrl, sourceUrl, scanUrl, artist, label, classified],
       );
 

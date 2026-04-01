@@ -1,4 +1,4 @@
-export const CARD_RARITIES = ["L", "C", "UC", "R", "SR", "SEC"] as const;
+export const CARD_RARITIES = ["L", "C", "UC", "R", "SR", "SEC", "P"] as const;
 
 export type CardRarity = (typeof CARD_RARITIES)[number];
 

@@ -31,6 +31,8 @@ const RARITY_MAP: Record<string, string> = {
   secretrare: "SEC",
   "secret-rare": "SEC",
   secret_rare: "SEC",
+  p: "P",
+  promo: "P",
 };
 
 const VARIANT_LABEL_MAP: Record<string, string> = {

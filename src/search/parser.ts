@@ -62,12 +62,17 @@ const NATURAL_LANGUAGE_RARITY_MAP: Record<string, string> = {
   uc: "UC",
   sr: "SR",
   sec: "SEC",
+  promo: "P",
 };
 
 const NATURAL_LANGUAGE_VARIANT_MAP: Record<string, string> = {
   sp: "SP",
   tr: "TR",
   manga: "Manga Art",
+};
+
+const NATURAL_LANGUAGE_PRODUCT_MAP: Record<string, string> = {
+  promo: "Promo",
 };
 
 const FIELD_ALIASES: Record<string, string> = {
@@ -299,58 +304,30 @@ function rewriteStandaloneKeyword(
   }
 
   const keyword = node.value.toLowerCase();
+  const alternatives: FilterNode[] = [];
+
   const typeValue = NATURAL_LANGUAGE_TYPE_MAP[keyword];
   if (typeValue) {
-    return {
-      type: "or",
-      children: [
-        node,
-        {
-          type: "filter",
-          field: "type",
-          operator: ":",
-          value: typeValue,
-          negated: false,
-        },
-      ],
-    };
+    alternatives.push({ type: "filter", field: "type", operator: ":", value: typeValue, negated: false });
   }
 
   const rarityValue = NATURAL_LANGUAGE_RARITY_MAP[keyword];
   if (rarityValue) {
-    return {
-      type: "or",
-      children: [
-        node,
-        {
-          type: "filter",
-          field: "rarity",
-          operator: ":",
-          value: rarityValue,
-          negated: false,
-        },
-      ],
-    };
+    alternatives.push({ type: "filter", field: "rarity", operator: ":", value: rarityValue, negated: false });
   }
 
   const variantValue = NATURAL_LANGUAGE_VARIANT_MAP[keyword];
   if (variantValue) {
-    return {
-      type: "or",
-      children: [
-        node,
-        {
-          type: "filter",
-          field: "is",
-          operator: ":",
-          value: keyword,
-          negated: false,
-        },
-      ],
-    };
+    alternatives.push({ type: "filter", field: "is", operator: ":", value: keyword, negated: false });
   }
 
-  return node;
+  const productValue = NATURAL_LANGUAGE_PRODUCT_MAP[keyword];
+  if (productValue) {
+    alternatives.push({ type: "filter", field: "product", operator: ":", value: productValue, negated: false });
+  }
+
+  if (alternatives.length === 0) return node;
+  return { type: "or", children: [node, ...alternatives] };
 }
 
 function isMeaningfulSearchTerm(node: SearchNode): boolean {

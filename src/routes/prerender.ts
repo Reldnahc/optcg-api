@@ -506,48 +506,46 @@ export async function prerenderRoutes(app: FastifyInstance) {
          ORDER BY d.character ASC, p.name ASC, d.id ASC`,
       ),
       query<ScanProgressRow>(
-        `WITH known_set_codes AS (
-           SELECT DISTINCT true_set_code AS set_code
-           FROM cards
-           WHERE language = 'en'
-         ),
-         product_bucket_map AS (
+        `WITH card_set_map AS (
            SELECT
-             p.id,
+             c.id AS card_id,
+             c.card_number,
+             c.product_id AS card_product_id,
              CASE
-               WHEN p.product_set_code IS NOT NULL
-                 AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
-               THEN p.product_set_code
+               WHEN c.card_number ~* '^P-' THEN 'P'
+               WHEN c.card_number ~* '^((?:OP|ST|EB|PRB)\\d{2})-' THEN UPPER(SUBSTRING(c.card_number FROM '^((?:OP|ST|EB|PRB)\\d{2})-'))
+               WHEN c.true_set_code IS NOT NULL AND BTRIM(c.true_set_code) <> '' THEN UPPER(c.true_set_code)
                ELSE '__other_products__'
              END AS bucket_key,
              CASE
-               WHEN p.product_set_code IS NOT NULL
-                 AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
-               THEN p.product_set_code
+               WHEN c.card_number ~* '^P-' THEN 'P'
+               WHEN c.card_number ~* '^((?:OP|ST|EB|PRB)\\d{2})-' THEN UPPER(SUBSTRING(c.card_number FROM '^((?:OP|ST|EB|PRB)\\d{2})-'))
+               WHEN c.true_set_code IS NOT NULL AND BTRIM(c.true_set_code) <> '' THEN UPPER(c.true_set_code)
                ELSE 'Other Products'
              END AS bucket_label,
              CASE
-               WHEN p.product_set_code IS NOT NULL
-                 AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
-               THEN 'set_product'
+               WHEN c.card_number ~* '^P-' THEN 'set_product'
+               WHEN c.card_number ~* '^((?:OP|ST|EB|PRB)\\d{2})-' THEN 'set_product'
+               WHEN c.true_set_code IS NOT NULL AND BTRIM(c.true_set_code) <> '' THEN 'set_product'
                ELSE 'other_products'
              END AS bucket_type
-           FROM products p
-           WHERE p.language = 'en'
+           FROM cards c
+           WHERE c.language = 'en'
          ),
          bucket_product_counts AS (
            SELECT
-             bucket_key,
-             MIN(bucket_label) AS bucket_label,
-             MIN(bucket_type) AS bucket_type,
-             COUNT(*)::int AS product_count
-           FROM product_bucket_map
-           GROUP BY bucket_key
+             csm.bucket_key,
+             MIN(csm.bucket_label) AS bucket_label,
+             MIN(csm.bucket_type) AS bucket_type,
+             COUNT(DISTINCT COALESCE(ci.product_id, csm.card_product_id))::int AS product_count
+           FROM card_set_map csm
+           LEFT JOIN card_images ci ON ci.card_id = csm.card_id
+           GROUP BY csm.bucket_key
          ),
          card_bucket_summary AS (
            SELECT
-             COALESCE(pbm.bucket_key, '__other_products__') AS bucket_key,
-             c.card_number,
+             csm.bucket_key,
+             csm.card_number,
              COUNT(ci.id)::int AS total_variants,
              COUNT(*) FILTER (
                WHERE ci.id IS NOT NULL
@@ -574,11 +572,9 @@ export async function prerenderRoutes(app: FastifyInstance) {
                  ELSE false
                END
              ), false) AS has_any_image_or_scan
-           FROM cards c
-           LEFT JOIN card_images ci ON ci.card_id = c.id
-           LEFT JOIN product_bucket_map pbm ON pbm.id = COALESCE(ci.product_id, c.product_id)
-           WHERE c.language = 'en'
-           GROUP BY COALESCE(pbm.bucket_key, '__other_products__'), c.card_number
+           FROM card_set_map csm
+           LEFT JOIN card_images ci ON ci.card_id = csm.card_id
+           GROUP BY csm.bucket_key, csm.card_number
          )
          SELECT
            cbs.bucket_key,

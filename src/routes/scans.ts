@@ -45,48 +45,46 @@ interface MissingScanVariantRow {
 }
 
 const PROGRESS_BUCKET_CTES = `
-  WITH known_set_codes AS (
-    SELECT DISTINCT true_set_code AS set_code
-    FROM cards
-    WHERE language = $1
-  ),
-  product_bucket_map AS (
+  WITH card_set_map AS (
     SELECT
-      p.id,
+      c.id AS card_id,
+      c.card_number,
+      c.product_id AS card_product_id,
       CASE
-        WHEN p.product_set_code IS NOT NULL
-          AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
-        THEN p.product_set_code
+        WHEN c.card_number ~* '^P-' THEN 'P'
+        WHEN c.card_number ~* '^((?:OP|ST|EB|PRB)\\d{2})-' THEN UPPER(SUBSTRING(c.card_number FROM '^((?:OP|ST|EB|PRB)\\d{2})-'))
+        WHEN c.true_set_code IS NOT NULL AND BTRIM(c.true_set_code) <> '' THEN UPPER(c.true_set_code)
         ELSE '__other_products__'
       END AS bucket_key,
       CASE
-        WHEN p.product_set_code IS NOT NULL
-          AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
-        THEN p.product_set_code
+        WHEN c.card_number ~* '^P-' THEN 'P'
+        WHEN c.card_number ~* '^((?:OP|ST|EB|PRB)\\d{2})-' THEN UPPER(SUBSTRING(c.card_number FROM '^((?:OP|ST|EB|PRB)\\d{2})-'))
+        WHEN c.true_set_code IS NOT NULL AND BTRIM(c.true_set_code) <> '' THEN UPPER(c.true_set_code)
         ELSE 'Other Products'
       END AS bucket_label,
       CASE
-        WHEN p.product_set_code IS NOT NULL
-          AND EXISTS (SELECT 1 FROM known_set_codes ks WHERE ks.set_code = p.product_set_code)
-        THEN 'set_product'
+        WHEN c.card_number ~* '^P-' THEN 'set_product'
+        WHEN c.card_number ~* '^((?:OP|ST|EB|PRB)\\d{2})-' THEN 'set_product'
+        WHEN c.true_set_code IS NOT NULL AND BTRIM(c.true_set_code) <> '' THEN 'set_product'
         ELSE 'other_products'
       END AS bucket_type
-    FROM products p
-    WHERE p.language = $1
+    FROM cards c
+    WHERE c.language = $1
   ),
   bucket_product_counts AS (
     SELECT
-      bucket_key,
-      MIN(bucket_label) AS bucket_label,
-      MIN(bucket_type) AS bucket_type,
-      COUNT(*)::int AS product_count
-    FROM product_bucket_map
-    GROUP BY bucket_key
+      csm.bucket_key,
+      MIN(csm.bucket_label) AS bucket_label,
+      MIN(csm.bucket_type) AS bucket_type,
+      COUNT(DISTINCT COALESCE(ci.product_id, csm.card_product_id))::int AS product_count
+    FROM card_set_map csm
+    LEFT JOIN card_images ci ON ci.card_id = csm.card_id
+    GROUP BY csm.bucket_key
   ),
   card_bucket_summary AS (
     SELECT
-      COALESCE(pbm.bucket_key, '__other_products__') AS bucket_key,
-      c.card_number,
+      csm.bucket_key,
+      csm.card_number,
       COUNT(ci.id)::int AS total_variants,
       COUNT(*) FILTER (
         WHERE ci.id IS NOT NULL
@@ -113,11 +111,9 @@ const PROGRESS_BUCKET_CTES = `
           ELSE false
         END
       ), false) AS has_any_image_or_scan
-    FROM cards c
-    LEFT JOIN card_images ci ON ci.card_id = c.id
-    LEFT JOIN product_bucket_map pbm ON pbm.id = COALESCE(ci.product_id, c.product_id)
-    WHERE c.language = $1
-    GROUP BY COALESCE(pbm.bucket_key, '__other_products__'), c.card_number
+    FROM card_set_map csm
+    LEFT JOIN card_images ci ON ci.card_id = csm.card_id
+    GROUP BY csm.bucket_key, csm.card_number
   ),
   overall_card_summary AS (
     SELECT
@@ -156,7 +152,7 @@ const PROGRESS_BUCKET_CTES = `
 `;
 
 export async function scansRoutes(app: FastifyInstance) {
-  // GET /v1/scans/progress — product-bucket scan progress + overall totals
+  // GET /v1/scans/progress — set-based scan progress + overall totals
   app.get("/scans/progress", { schema: scanProgressRouteSchema }, async (req, reply) => {
     const qs = (req.query ?? {}) as { lang?: string };
     const language = (qs.lang || "en").trim().toLowerCase();
@@ -275,11 +271,11 @@ export async function scansRoutes(app: FastifyInstance) {
           p.name AS product_name,
           p.product_set_code
         FROM cards c
+        JOIN card_set_map csm ON csm.card_id = c.id
         JOIN card_images ci ON ci.card_id = c.id
         LEFT JOIN products p ON p.id = ci.product_id
-        LEFT JOIN product_bucket_map pbm ON pbm.id = COALESCE(ci.product_id, c.product_id)
         WHERE c.language = $1
-          AND COALESCE(pbm.bucket_key, '__other_products__') = $2
+          AND csm.bucket_key = $2
           AND ci.scan_url IS NULL
           AND ci.scan_source_s3_key IS NULL
         ORDER BY c.card_number ASC, ci.variant_index ASC
@@ -293,11 +289,11 @@ export async function scansRoutes(app: FastifyInstance) {
           p.name AS product_name,
           p.product_set_code
         FROM cards c
+        JOIN card_set_map csm ON csm.card_id = c.id
         JOIN card_images ci ON ci.card_id = c.id
         LEFT JOIN products p ON p.id = ci.product_id
-        LEFT JOIN product_bucket_map pbm ON pbm.id = COALESCE(ci.product_id, c.product_id)
         WHERE c.language = $1
-          AND COALESCE(pbm.bucket_key, '__other_products__') = $2
+          AND csm.bucket_key = $2
           AND ci.image_url IS NULL
         ORDER BY c.card_number ASC, ci.variant_index ASC
       `, [language, bucket_key]),

@@ -392,6 +392,10 @@ function compileFilter(
           SELECT 1 FROM card_images ci
           WHERE ci.card_id = c.id AND ci.label = 'Manga Art'
         )
+      ) AND NOT EXISTS (
+        SELECT 1 FROM format_bans fb
+        JOIN formats f ON f.id = fb.format_id
+        WHERE f.name ILIKE ${p} AND fb.card_number = c.card_number AND fb.unbanned_at IS NULL
       )`;
       return negated ? `NOT (${sql})` : sql;
     }

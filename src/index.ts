@@ -13,6 +13,7 @@ import { docsRoutes } from "./routes/docs.js";
 import { reportRoute } from "./routes/report.js";
 import { scansRoutes } from "./routes/scans.js";
 import { prerenderRoutes } from "./routes/prerender.js";
+import { decksRoutes } from "./routes/decks.js";
 import { getAdminOrigin } from "./admin/config.js";
 import { adminAuthRoutes } from "./admin/auth.js";
 import { adminCardsRoutes } from "./admin/cards.js";
@@ -112,6 +113,7 @@ app.register(donRoutes, { prefix: "/v1" });
 app.register(reportRoute, { prefix: "/v1" });
 app.register(scansRoutes, { prefix: "/v1" });
 app.register(prerenderRoutes, { prefix: "/v1" });
+app.register(decksRoutes, { prefix: "/v1" });
 app.register(adminAuthRoutes, { prefix: "/admin" });
 app.register(async (adminApp) => {
   adminApp.register(async (protectedAdminApp) => {

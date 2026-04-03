@@ -144,6 +144,26 @@ async function loadBatchForUpload(batchId: string): Promise<{ id: string; langua
   return batchResult.rows[0] ?? null;
 }
 
+async function deleteScanAssetKeys(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+
+  const s3 = getScanIngestS3Config();
+  const client = getS3Client(s3.region);
+
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000);
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: s3.bucket,
+        Delete: {
+          Objects: batch.map((Key) => ({ Key })),
+          Quiet: true,
+        },
+      }),
+    );
+  }
+}
+
 function deriveFileNameFromKey(key: string): string {
   const base = key.split("/").pop() ?? key;
   return base.replace(/^\d+-/, "");
@@ -320,7 +340,8 @@ async function refreshBatchStatus(batchId: string): Promise<void> {
            WHEN COALESCE(f.failed_files, 0) > 0 AND COALESCE(i.total_items, 0) = 0 THEN 'failed'
            WHEN COALESCE(i.total_items, 0) = 0 THEN b.status
            WHEN COALESCE(i.review_items, 0) > 0 THEN 'needs_review'
-           WHEN COALESCE(i.linked_items, 0) = COALESCE(i.total_items, 0) THEN 'linked'
+           WHEN COALESCE(i.failed_items, 0) = COALESCE(i.total_items, 0) THEN 'failed'
+           WHEN COALESCE(i.linked_items, 0) + COALESCE(i.failed_items, 0) = COALESCE(i.total_items, 0) THEN 'linked'
            ELSE 'processed'
          END,
          processed_at = CASE
@@ -958,24 +979,7 @@ export async function adminScansRoutes(app: FastifyInstance) {
       .map((row) => row.key)
       .filter((key): key is string => Boolean(key));
 
-    // Delete from S3 in batches of 1000 (S3 limit)
-    if (allKeys.length > 0) {
-      const s3 = getScanIngestS3Config();
-      const client = getS3Client(s3.region);
-
-      for (let i = 0; i < allKeys.length; i += 1000) {
-        const batch = allKeys.slice(i, i + 1000);
-        await client.send(
-          new DeleteObjectsCommand({
-            Bucket: s3.bucket,
-            Delete: {
-              Objects: batch.map((Key) => ({ Key })),
-              Quiet: true,
-            },
-          }),
-        );
-      }
-    }
+    await deleteScanAssetKeys(allKeys);
 
     // Delete items, mark files as failed, mark batch as failed
     await query(`DELETE FROM scan_ingest_items WHERE batch_id = $1`, [batch_id]);
@@ -1001,6 +1005,75 @@ export async function adminScansRoutes(app: FastifyInstance) {
       data: {
         batch_id,
         deleted_s3_keys: allKeys.length,
+      },
+    };
+  });
+
+  app.post("/scan-items/:item_id/reject", async (req, reply) => {
+    const { item_id } = req.params as { item_id: string };
+
+    const itemResult = await query<{
+      id: string;
+      batch_id: string;
+      status: ItemStatus;
+      processed_s3_key: string | null;
+      artist_crop_s3_key: string | null;
+      footer_crop_s3_key: string | null;
+    }>(
+      `SELECT id, batch_id, status, processed_s3_key, artist_crop_s3_key, footer_crop_s3_key
+       FROM scan_ingest_items
+       WHERE id = $1
+       LIMIT 1`,
+      [item_id],
+    );
+
+    if (itemResult.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "Scan item not found" } };
+    }
+
+    const item = itemResult.rows[0];
+    if (item.status === "linked") {
+      reply.code(400);
+      return { error: { status: 400, message: "Cannot reject a scan item that has already been linked" } };
+    }
+
+    const keys = [
+      item.processed_s3_key,
+      item.artist_crop_s3_key,
+      item.footer_crop_s3_key,
+    ].filter((key): key is string => Boolean(key));
+
+    await deleteScanAssetKeys(keys);
+
+    const updated = await query<{
+      id: string;
+      batch_id: string;
+      status: ItemStatus;
+    }>(
+      `UPDATE scan_ingest_items
+       SET status = 'failed',
+           processed_s3_key = NULL,
+           processed_url = NULL,
+           artist_crop_s3_key = NULL,
+           artist_crop_url = NULL,
+           footer_crop_s3_key = NULL,
+           footer_crop_url = NULL,
+           error = 'Rejected by admin',
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, batch_id, status`,
+      [item_id],
+    );
+
+    await refreshBatchStatus(updated.rows[0].batch_id);
+
+    return {
+      data: {
+        id: updated.rows[0].id,
+        batch_id: updated.rows[0].batch_id,
+        status: updated.rows[0].status,
+        deleted_s3_keys: keys.length,
       },
     };
   });
@@ -1169,9 +1242,13 @@ export async function adminScansRoutes(app: FastifyInstance) {
     const imageResult = await query<{
       card_id: string;
       card_image_id: string;
-      existing_artist: string | null;
+      existing_scan_url: string | null;
+      existing_scan_source_s3_key: string | null;
     }>(
-      `SELECT c.id AS card_id, ci.id AS card_image_id, ci.artist AS existing_artist
+      `SELECT c.id AS card_id,
+              ci.id AS card_image_id,
+              ci.scan_url AS existing_scan_url,
+              ci.scan_source_s3_key AS existing_scan_source_s3_key
        FROM cards c
        JOIN card_images ci ON ci.card_id = c.id
        WHERE c.card_number ILIKE $1
@@ -1200,6 +1277,7 @@ export async function adminScansRoutes(app: FastifyInstance) {
            scan_derivative_processed_at = NULL,
            artist = CASE
              WHEN (artist IS NULL OR btrim(artist) = '')
+               AND $5::boolean = false
                AND $4::text IS NOT NULL
                AND btrim($4::text) <> ''
              THEN $4::text
@@ -1207,13 +1285,20 @@ export async function adminScansRoutes(app: FastifyInstance) {
            END,
            artist_source = CASE
              WHEN (artist IS NULL OR btrim(artist) = '')
+               AND $5::boolean = false
                AND $4::text IS NOT NULL
                AND btrim($4::text) <> ''
              THEN 'manual'
              ELSE artist_source
            END
        WHERE id = $1`,
-      [image.card_image_id, item.processed_s3_key, item.processed_url, item.artist],
+      [
+        image.card_image_id,
+        item.processed_s3_key,
+        item.processed_url,
+        item.artist,
+        Boolean(image.existing_scan_source_s3_key || image.existing_scan_url),
+      ],
     );
 
     const updated = await query<{

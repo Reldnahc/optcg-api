@@ -383,11 +383,7 @@ function compileFilter(
 
     case "legal": {
       const p = param(ctx, value);
-      // A card is legal if:
-      // 1. It's released (product has released_at <= now)
-      // 2. Its block is legal in the format, OR it has a Manga Art printing (exempt from rotation)
-      // 3. AND it's not banned
-      const sql = `p.released_at IS NOT NULL AND p.released_at <= CURRENT_DATE AND (
+      const sql = `(
         EXISTS (
           SELECT 1 FROM format_legal_blocks flb
           JOIN formats f ON f.id = flb.format_id
@@ -396,10 +392,6 @@ function compileFilter(
           SELECT 1 FROM card_images ci
           WHERE ci.card_id = c.id AND ci.label = 'Manga Art'
         )
-      ) AND NOT EXISTS (
-        SELECT 1 FROM format_bans fb
-        JOIN formats f ON f.id = fb.format_id
-        WHERE f.name ILIKE ${p} AND fb.card_number = c.card_number AND fb.unbanned_at IS NULL
       )`;
       return negated ? `NOT (${sql})` : sql;
     }

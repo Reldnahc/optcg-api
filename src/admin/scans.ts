@@ -1,4 +1,4 @@
-import { ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
@@ -914,6 +914,95 @@ export async function adminScansRoutes(app: FastifyInstance) {
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }
+  });
+
+  app.post("/scan-batches/:batch_id/reject", async (req, reply) => {
+    const { batch_id } = req.params as { batch_id: string };
+
+    const batchResult = await query<{ id: string; status: BatchStatus }>(
+      `SELECT id, status
+       FROM scan_ingest_batches
+       WHERE id = $1
+       LIMIT 1`,
+      [batch_id],
+    );
+
+    if (batchResult.rows.length === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "Scan batch not found" } };
+    }
+
+    if (batchResult.rows[0].status === "linked") {
+      reply.code(400);
+      return { error: { status: 400, message: "Cannot reject a batch that has already been linked" } };
+    }
+
+    // Collect all S3 keys to delete
+    const [itemKeys, fileKeys] = await Promise.all([
+      query<{ key: string }>(
+        `SELECT unnest(ARRAY[processed_s3_key, artist_crop_s3_key, footer_crop_s3_key]) AS key
+         FROM scan_ingest_items
+         WHERE batch_id = $1`,
+        [batch_id],
+      ),
+      query<{ key: string }>(
+        `SELECT s3_key AS key
+         FROM scan_ingest_files
+         WHERE batch_id = $1
+           AND s3_key IS NOT NULL`,
+        [batch_id],
+      ),
+    ]);
+
+    const allKeys = [...itemKeys.rows, ...fileKeys.rows]
+      .map((row) => row.key)
+      .filter((key): key is string => Boolean(key));
+
+    // Delete from S3 in batches of 1000 (S3 limit)
+    if (allKeys.length > 0) {
+      const s3 = getScanIngestS3Config();
+      const client = getS3Client(s3.region);
+
+      for (let i = 0; i < allKeys.length; i += 1000) {
+        const batch = allKeys.slice(i, i + 1000);
+        await client.send(
+          new DeleteObjectsCommand({
+            Bucket: s3.bucket,
+            Delete: {
+              Objects: batch.map((Key) => ({ Key })),
+              Quiet: true,
+            },
+          }),
+        );
+      }
+    }
+
+    // Delete items, mark files as failed, mark batch as failed
+    await query(`DELETE FROM scan_ingest_items WHERE batch_id = $1`, [batch_id]);
+    await query(
+      `UPDATE scan_ingest_files
+       SET status = 'failed',
+           error = 'Batch rejected',
+           updated_at = NOW()
+       WHERE batch_id = $1`,
+      [batch_id],
+    );
+    await query(
+      `UPDATE scan_ingest_batches
+       SET status = 'failed',
+           total_items = 0,
+           last_error = 'Batch rejected',
+           updated_at = NOW()
+       WHERE id = $1`,
+      [batch_id],
+    );
+
+    return {
+      data: {
+        batch_id,
+        deleted_s3_keys: allKeys.length,
+      },
+    };
   });
 
   app.put("/scan-items/:item_id", async (req, reply) => {

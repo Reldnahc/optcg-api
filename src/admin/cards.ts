@@ -1118,8 +1118,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     }
 
     try {
-      const imageUrl = asOptionalString(body.image_url, "image_url");
-      if (!imageUrl) throw new Error("image_url is required");
+      const imageUrl = asOptionalString(body.image_url, "image_url") ?? null;
 
       const sourceUrl = asOptionalString(body.source_url, "source_url") ?? null;
       const scanUrl = asOptionalString(body.scan_url, "scan_url") ?? null;
@@ -1158,7 +1157,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         card_id: string;
         product_id: string | null;
         variant_index: number;
-        image_url: string;
+        image_url: string | null;
         source_url: string | null;
         scan_url: string | null;
         artist: string | null;

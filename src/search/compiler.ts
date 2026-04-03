@@ -5,7 +5,7 @@
 import { SearchNode, Operator } from "./parser.js";
 import { requireCardRarity } from "../rarity.js";
 import { artistFilterSql, normalizedArtistFilterSql } from "../artist.js";
-import { formatBlockAllowedSql } from "../formatLegality.js";
+import { formatCardBlockLegalSql } from "../formatLegality.js";
 import { variantDisplayOrderSql } from "../format.js";
 import { normalizeColorFilter, toPgTextArrayLiteral } from "../colors.js";
 
@@ -385,9 +385,10 @@ function compileFilter(
       const p = param(ctx, value);
       const sql = `(
         EXISTS (
-          SELECT 1 FROM format_legal_blocks flb
-          JOIN formats f ON f.id = flb.format_id
-          WHERE f.name ILIKE ${p} AND flb.block = c.block AND ${formatBlockAllowedSql("flb", "f")}
+          SELECT 1
+          FROM formats f
+          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = c.block
+          WHERE f.name ILIKE ${p} AND ${formatCardBlockLegalSql("c.block", "flb", "f")}
         ) OR EXISTS (
           SELECT 1 FROM card_images ci
           WHERE ci.card_id = c.id AND ci.label = 'Manga Art'

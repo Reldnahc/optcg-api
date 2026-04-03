@@ -6,6 +6,18 @@ export function formatBlockAllowedSql(blockAlias: string, formatAlias: string): 
   return `(COALESCE(${formatAlias}.has_rotation, true) = false OR ${formatBlockIsLegalSql(blockAlias)})`;
 }
 
+export function formatBlocklessExceptionSql(cardBlockAlias: string, formatAlias: string): string {
+  return `(UPPER(COALESCE(${cardBlockAlias}, '')) = 'X' AND COALESCE(${formatAlias}.has_rotation, true) = true)`;
+}
+
+export function formatCardBlockLegalSql(
+  cardBlockAlias: string,
+  blockAlias: string,
+  formatAlias: string,
+): string {
+  return `(${formatBlocklessExceptionSql(cardBlockAlias, formatAlias)} OR (${blockAlias}.block IS NOT NULL AND ${blockAlias}.block = ${cardBlockAlias} AND ${formatBlockAllowedSql(blockAlias, formatAlias)}))`;
+}
+
 export function deriveFormatBlockLegal(rotatedAt: string | null, now: Date = new Date()): boolean {
   if (!rotatedAt) return true;
 

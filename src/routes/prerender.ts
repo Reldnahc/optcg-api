@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { compareVariantDisplayOrder, thumbnailUrl, setName } from "../format.js";
-import { formatBlockAllowedSql } from "../formatLegality.js";
+import { formatBlockAllowedSql, formatCardBlockLegalSql } from "../formatLegality.js";
 import { prerenderManifestRouteSchema } from "../schemas/public.js";
 
 type RenderGroup =
@@ -408,7 +408,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
       query<CardLegalityRow>(
         `SELECT c.id AS card_id,
                 f.name AS format_name,
-                COALESCE(BOOL_AND(${formatBlockAllowedSql("flb", "f")}), false) AS legal
+                COALESCE(BOOL_OR(${formatCardBlockLegalSql("c.block", "flb", "f")}), false) AS legal
          FROM cards c
          CROSS JOIN formats f
          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = c.block

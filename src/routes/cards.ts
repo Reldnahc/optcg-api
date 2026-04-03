@@ -4,7 +4,7 @@ import { parseSearch, SearchNode } from "../search/parser.js";
 import { compileSearch } from "../search/compiler.js";
 import { CARD_RARITY_ORDER_SQL, normalizeCardRarity } from "../rarity.js";
 import { artistFilterSql, artistSortSql } from "../artist.js";
-import { formatBlockAllowedSql } from "../formatLegality.js";
+import { formatCardBlockLegalSql } from "../formatLegality.js";
 import { normalizeColorFilter, toPgTextArrayLiteral } from "../colors.js";
 import {
   cardAutocompleteRouteSchema,
@@ -880,7 +880,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
              SELECT DISTINCT UNNEST($1::text[]) AS block
            )
            SELECT rb.block, f.name AS format_name,
-                  COALESCE(BOOL_AND(${formatBlockAllowedSql("flb", "f")}), false) AS legal
+                 COALESCE(BOOL_OR(${formatCardBlockLegalSql("rb.block", "flb", "f")}), false) AS legal
            FROM requested_blocks rb
            CROSS JOIN formats f
            LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = rb.block
@@ -1032,7 +1032,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       ),
       runQuery<FormatLegalityRow>(
         `SELECT $1::text AS block, f.name AS format_name,
-                COALESCE(BOOL_AND(${formatBlockAllowedSql("flb", "f")}), false) AS legal
+                COALESCE(BOOL_OR(${formatCardBlockLegalSql("$1", "flb", "f")}), false) AS legal
          FROM formats f
          LEFT JOIN format_legal_blocks flb ON flb.format_id = f.id AND flb.block = $1
          GROUP BY f.id, f.name`,

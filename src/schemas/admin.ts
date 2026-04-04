@@ -283,6 +283,7 @@ export const adminRunPricesRouteSchema = {
     additionalProperties: false,
     properties: {
       wipe: { type: "boolean" },
+      wipe_empty_artifacts: { type: "boolean" },
       archive_date: { type: "string" },
       archive_from: { type: "string" },
       archive_to: { type: "string" },

@@ -257,26 +257,32 @@ export async function adminScraperRoutes(app: FastifyInstance) {
   app.post("/prices/run", { schema: adminRunPricesRouteSchema }, async (req, reply) => {
     const body = (req.body ?? {}) as {
       wipe?: unknown;
+      wipe_empty_artifacts?: unknown;
       archive_date?: unknown;
       archive_from?: unknown;
       archive_to?: unknown;
       dedupe_links?: unknown;
     };
     const wipe = body.wipe === true;
+    const wipeEmptyArtifacts = body.wipe_empty_artifacts === true;
     const dedupeLinks = body.dedupe_links === true;
     const archiveDate = typeof body.archive_date === "string" ? body.archive_date.trim() : "";
     const archiveFrom = typeof body.archive_from === "string" ? body.archive_from.trim() : "";
     const archiveTo = typeof body.archive_to === "string" ? body.archive_to.trim() : "";
 
-    if (wipe && (archiveDate || archiveFrom || archiveTo || dedupeLinks)) {
+    if (wipe && (wipeEmptyArtifacts || archiveDate || archiveFrom || archiveTo || dedupeLinks)) {
       reply.code(400);
       return { error: { status: 400, message: "wipe cannot be combined with archive sync" } };
+    }
+    if (wipeEmptyArtifacts && (archiveDate || archiveFrom || archiveTo || dedupeLinks || wipe)) {
+      reply.code(400);
+      return { error: { status: 400, message: "wipe_empty_artifacts must run by itself" } };
     }
     if (dedupeLinks && (archiveDate || archiveFrom || archiveTo)) {
       reply.code(400);
       return { error: { status: 400, message: "dedupe_links cannot be combined with archive sync" } };
     }
-    if (dedupeLinks && wipe) {
+    if (dedupeLinks && (wipe || wipeEmptyArtifacts)) {
       reply.code(400);
       return { error: { status: 400, message: "dedupe_links cannot be combined with wipe" } };
     }
@@ -292,6 +298,8 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     const command = ["prices"];
     if (wipe) {
       command.push("--wipe");
+    } else if (wipeEmptyArtifacts) {
+      command.push("--wipe-empty-artifacts");
     } else if (dedupeLinks) {
       command.push("--cleanup-placeholders");
     } else if (archiveDate) {
@@ -305,7 +313,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       return { data: result };
     } catch (error: any) {
       req.log.error(
-        { err: error, wipe, dedupeLinks, archiveDate, archiveFrom, archiveTo, command },
+        { err: error, wipe, wipeEmptyArtifacts, dedupeLinks, archiveDate, archiveFrom, archiveTo, command },
         "Failed to start prices task",
       );
       reply.code(501);

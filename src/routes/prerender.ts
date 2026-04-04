@@ -50,6 +50,7 @@ interface CardVariantRow {
   artist: string | null;
   image_url: string | null;
   scan_url: string | null;
+  scan_download_url: string | null;
   scan_thumb_url: string | null;
   classified: boolean;
   product_name: string | null;
@@ -258,6 +259,7 @@ function cardRoutePayload(
           image_thumb_url: thumbnailUrl(variant.image_url),
           thumbnail_url: thumbnailUrl(variant.image_url),
           scan_url: variant.scan_url,
+          scan_download_url: variant.scan_download_url,
           scan_thumbnail_url: variant.scan_thumb_url,
         },
         market: {
@@ -360,6 +362,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
         `SELECT ci.card_id, ci.variant_index, ci.label, ci.artist,
                 ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
                 ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_download_url,
                 ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.classified, ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
                 canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,

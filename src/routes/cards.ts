@@ -153,6 +153,7 @@ type CardImageRow = {
   variant_index: number;
   image_url: string | null;
   scan_url: string | null;
+  scan_download_url: string | null;
   scan_thumb_url: string | null;
   artist: string | null;
   label: string | null;
@@ -196,6 +197,7 @@ type VariantDetail = {
   artist: string | null;
   image_url: string | null;
   scan_url: string | null;
+  scan_download_url: string | null;
   scan_thumb_url: string | null;
   product: {
     name: string | null;
@@ -246,6 +248,7 @@ function buildVariants(imageRows: CardImageRow[]) {
         artist: img.artist,
         image_url: img.image_url,
         scan_url: img.scan_url,
+        scan_download_url: img.scan_download_url,
         scan_thumb_url: img.scan_thumb_url,
         product: {
           name: img.product_name,
@@ -299,6 +302,7 @@ function buildVariants(imageRows: CardImageRow[]) {
       image_thumb_url: thumbnailUrl(variant.image_url),
       thumbnail_url: thumbnailUrl(variant.image_url),
       scan_url: variant.scan_url,
+      scan_download_url: variant.scan_download_url,
       scan_thumbnail_url: variant.scan_thumb_url,
     },
     market: variant.market,
@@ -676,6 +680,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
           `SELECT c.*, p.name AS product_name, p.released_at,
                   ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
                   ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
+                  ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_download_url,
                   ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                   latest_price.tcgplayer_url, latest_price.market_price, latest_price.low_price, latest_price.mid_price, latest_price.high_price,
                   ci.label, ci.variant_index,
@@ -853,6 +858,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         `SELECT ci.card_id, c.card_number, ci.variant_index,
                 ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
                 ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_download_url,
                 ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,
@@ -1012,6 +1018,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         `SELECT ci.card_id, c.card_number, ci.variant_index,
                 ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
                 ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_download_url,
                 ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,

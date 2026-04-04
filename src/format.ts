@@ -196,6 +196,7 @@ export interface CardRow {
 /** Format a card row for API response */
 export function formatCard(row: CardRow & {
   image_url?: string | null;
+  image_thumb_url?: string | null;
   scan_url?: string | null;
   scan_thumb_url?: string | null;
   tcgplayer_url?: string | null;
@@ -230,7 +231,8 @@ export function formatCard(row: CardRow & {
     ...(row.image_url !== undefined
       ? {
           image_url: row.image_url,
-          thumbnail_url: thumbnailUrl(row.image_url),
+          image_thumb_url: row.image_thumb_url ?? thumbnailUrl(row.image_url),
+          thumbnail_url: row.image_thumb_url ?? thumbnailUrl(row.image_url),
         }
       : {}),
     ...(row.scan_url !== undefined

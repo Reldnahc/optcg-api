@@ -146,6 +146,7 @@ export const cardSummarySchema = {
     trigger: nullable({ type: "string" }),
     block: nullable({ type: "string" }),
     image_url: nullable({ type: "string" }),
+    image_thumb_url: nullable({ type: "string" }),
     thumbnail_url: nullable({ type: "string" }),
     scan_url: nullable({ type: "string" }),
     scan_thumb_url: nullable({ type: "string" }),

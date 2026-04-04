@@ -99,6 +99,7 @@ const setCardSchema = {
     cost: nullable({ type: "integer" }),
     power: nullable({ type: "integer" }),
     image_url: nullable({ type: "string" }),
+    image_thumb_url: nullable({ type: "string" }),
     thumbnail_url: nullable({ type: "string" }),
   },
 };
@@ -403,9 +404,10 @@ const cardVariantSchema = {
     media: {
       type: "object",
       additionalProperties: false,
-      required: ["image_url", "thumbnail_url", "scan_url", "scan_thumbnail_url"],
+      required: ["image_url", "image_thumb_url", "thumbnail_url", "scan_url", "scan_thumbnail_url"],
       properties: {
         image_url: nullable({ type: "string" }),
+        image_thumb_url: nullable({ type: "string" }),
         thumbnail_url: nullable({ type: "string" }),
         scan_url: nullable({ type: "string" }),
         scan_thumbnail_url: nullable({ type: "string" }),

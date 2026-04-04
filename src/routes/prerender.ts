@@ -255,6 +255,7 @@ function cardRoutePayload(
         },
         media: {
           image_url: variant.image_url,
+          image_thumb_url: thumbnailUrl(variant.image_url),
           thumbnail_url: thumbnailUrl(variant.image_url),
           scan_url: variant.scan_url,
           scan_thumbnail_url: variant.scan_thumb_url,

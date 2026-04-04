@@ -4,6 +4,7 @@ import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { syncCardImageAsset } from "../cardImageAssets.js";
 import { getScanIngestS3Config } from "./config.js";
+import { copyScanSourceToCanonicalLocation } from "./scanSourceStorage.js";
 import { hasRunningTask, runConfiguredTask } from "./tasks.js";
 
 type BatchStatus = "uploaded" | "processing" | "processed" | "needs_review" | "failed" | "linked";
@@ -1265,6 +1266,11 @@ export async function adminScansRoutes(app: FastifyInstance) {
     }
 
     const image = imageResult.rows[0];
+    const canonicalScanSource = await copyScanSourceToCanonicalLocation(
+      image.card_image_id,
+      item.processed_s3_key,
+    );
+
     await query(
       `UPDATE card_images
        SET scan_url = NULL,
@@ -1295,8 +1301,8 @@ export async function adminScansRoutes(app: FastifyInstance) {
        WHERE id = $1`,
       [
         image.card_image_id,
-        item.processed_s3_key,
-        item.processed_url,
+        canonicalScanSource.storageKey,
+        canonicalScanSource.publicUrl,
         item.artist,
         Boolean(image.existing_scan_source_s3_key || image.existing_scan_url),
       ],
@@ -1306,8 +1312,9 @@ export async function adminScansRoutes(app: FastifyInstance) {
       syncCardImageAsset({
         cardImageId: image.card_image_id,
         role: "scan_source",
-        storageKey: item.processed_s3_key,
-        publicUrl: item.processed_url,
+        storageKey: canonicalScanSource.storageKey,
+        publicUrl: canonicalScanSource.publicUrl,
+        sourceUrl: item.processed_url,
       }),
       syncCardImageAsset({
         cardImageId: image.card_image_id,

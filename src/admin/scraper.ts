@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
+import { cardImageAssetPublicUrlSql } from "../format.js";
 import { hasRunningTask, runConfiguredTask } from "./tasks.js";
 import {
   adminRunPricesRouteSchema,
@@ -195,8 +196,8 @@ export async function adminScraperRoutes(app: FastifyInstance) {
          c.name,
          ci.variant_index,
          ci.label,
-         ci.image_url,
-         ci.scan_url,
+         ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+         ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
          ci.artist,
          ci.artist_source,
          ci.artist_ocr_status,

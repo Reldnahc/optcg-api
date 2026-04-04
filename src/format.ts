@@ -28,10 +28,24 @@ export function labelOrderSql(alias?: string): string {
 /** SQL CASE expression for ordering by label priority. Use in ORDER BY or subquery. */
 export const LABEL_ORDER_SQL = labelOrderSql();
 
+export function cardImageAssetPublicUrlSql(
+  cardImageIdExpr: string,
+  role: "image_url" | "image_thumb" | "scan_source" | "scan_url" | "scan_thumb" | "scan_display",
+  fallbackExpr: string,
+): string {
+  return `COALESCE((
+    SELECT cia.public_url
+    FROM card_image_assets cia
+    WHERE cia.card_image_id = ${cardImageIdExpr}
+      AND cia.role = '${role}'
+    LIMIT 1
+  ), ${fallbackExpr})`;
+}
+
 /** SQL expression for the public card-page variant ordering. */
 export function variantDisplayOrderSql(cardImageAlias: string, productAlias: string): string {
   return [
-    `CASE WHEN NULLIF(BTRIM(COALESCE(${cardImageAlias}.image_url, '')), '') IS NULL THEN 1 ELSE 0 END`,
+    `CASE WHEN NULLIF(BTRIM(COALESCE(${cardImageAssetPublicUrlSql(`${cardImageAlias}.id`, "image_url", `${cardImageAlias}.image_url`)}, '')), '') IS NULL THEN 1 ELSE 0 END`,
     `CASE WHEN ${productAlias}.released_at IS NULL THEN 1 ELSE 0 END`,
     `${productAlias}.released_at ASC`,
     labelOrderSql(cardImageAlias),
@@ -63,7 +77,7 @@ export function compareVariantDisplayOrder(
 
 /** SQL subquery to get the best image_url for a card (by label priority). Bind card id column. */
 export function bestImageSubquery(cardIdExpr: string): string {
-  return `(SELECT ci.image_url FROM card_images ci
+  return `(SELECT ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} FROM card_images ci
     LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
     ORDER BY ${variantDisplayOrderSql("ci", "ip")} LIMIT 1)`;
@@ -71,7 +85,7 @@ export function bestImageSubquery(cardIdExpr: string): string {
 
 /** SQL subquery to get the best scan_url for a card using the same best-variant ordering. */
 export function bestScanUrlSubquery(cardIdExpr: string): string {
-  return `(SELECT ci.scan_url FROM card_images ci
+  return `(SELECT ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} FROM card_images ci
     LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
     ORDER BY ${variantDisplayOrderSql("ci", "ip")} LIMIT 1)`;
@@ -79,7 +93,7 @@ export function bestScanUrlSubquery(cardIdExpr: string): string {
 
 /** SQL subquery to get the best scan thumbnail url for a card using the same best-variant ordering. */
 export function bestScanThumbSubquery(cardIdExpr: string): string {
-  return `(SELECT ci.scan_thumb_url FROM card_images ci
+  return `(SELECT ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} FROM card_images ci
     LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
     ORDER BY ${variantDisplayOrderSql("ci", "ip")} LIMIT 1)`;

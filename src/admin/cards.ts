@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import {
   bestImageSubquery,
+  cardImageAssetPublicUrlSql,
   compareVariantDisplayOrder,
   formatCard,
   CardRow,
@@ -10,6 +11,7 @@ import {
 } from "../format.js";
 import { formatCardBlockLegalSql } from "../formatLegality.js";
 import { normalizeCardRarity } from "../rarity.js";
+import { syncCardImageAsset } from "../cardImageAssets.js";
 
 const CARD_TYPES = new Set(["Leader", "Character", "Event", "Stage"]);
 const COLORS = new Set(["Red", "Green", "Blue", "Purple", "Black", "Yellow"]);
@@ -74,6 +76,27 @@ function asOptionalStringArray(
 function deriveSetCodeFromCardNumber(cardNumber: string): string | null {
   const match = cardNumber.match(/^([A-Z0-9]+)-/);
   return match ? match[1] : null;
+}
+
+async function syncManualVariantAssets(image: {
+  id: string;
+  image_url: string | null;
+  source_url: string | null;
+  scan_url: string | null;
+}) {
+  await Promise.all([
+    syncCardImageAsset({
+      cardImageId: image.id,
+      role: "image_url",
+      publicUrl: image.image_url,
+      sourceUrl: image.image_url ? image.source_url : null,
+    }),
+    syncCardImageAsset({
+      cardImageId: image.id,
+      role: "scan_url",
+      publicUrl: image.scan_url,
+    }),
+  ]);
 }
 
 async function getCardRecord(cardNumber: string, language: string) {
@@ -353,7 +376,10 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         high_price: string | null;
         sub_type: string | null;
       }>(
-        `SELECT ci.product_id, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
+        `SELECT ci.product_id, ci.variant_index,
+                ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,
                 ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
@@ -1005,6 +1031,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       params,
     );
 
+    await syncManualVariantAssets(updated.rows[0]);
     return { data: updated.rows[0] };
   });
 
@@ -1173,6 +1200,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         [card.id, productId, variantIndex, imageUrl, sourceUrl, scanUrl, artist, label, classified],
       );
 
+      await syncManualVariantAssets(inserted.rows[0]);
       return { data: inserted.rows[0] };
     } catch (error: any) {
       if (reply.sent) return;

@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { compareVariantDisplayOrder, thumbnailUrl, setName } from "../format.js";
+import { cardImageAssetPublicUrlSql, compareVariantDisplayOrder, thumbnailUrl, setName } from "../format.js";
 import { formatBlockAllowedSql, formatCardBlockLegalSql } from "../formatLegality.js";
 import { prerenderManifestRouteSchema } from "../schemas/public.js";
 
@@ -356,7 +356,10 @@ export async function prerenderRoutes(app: FastifyInstance) {
          ORDER BY c.card_number ASC`,
       ),
       query<CardVariantRow>(
-        `SELECT ci.card_id, ci.variant_index, ci.label, ci.artist, ci.image_url, ci.scan_url, ci.scan_thumb_url,
+        `SELECT ci.card_id, ci.variant_index, ci.label, ci.artist,
+                ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.classified, ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
                 canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,
                 COALESCE(price_rows.prices, '[]'::json) AS prices
@@ -442,7 +445,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
       ),
       query<SetCardRow>(
         `SELECT c.true_set_code, c.card_number, c.name, c.card_type, c.rarity, c.color, c.cost, c.power,
-                (SELECT ci.image_url
+                (SELECT ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")}
                  FROM card_images ci
                  LEFT JOIN products ip ON ip.id = ci.product_id
                  WHERE ci.card_id = c.id AND ci.classified = true

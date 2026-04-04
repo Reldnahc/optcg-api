@@ -32,6 +32,7 @@ import {
   formatCardPlainText,
   CardRow,
   compareVariantDisplayOrder,
+  cardImageAssetPublicUrlSql,
   labelOrder,
   LABEL_ORDER_SQL,
   bestImageSubquery,
@@ -671,7 +672,9 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
           variant_product_name: string | null;
         }>(
           `SELECT c.*, p.name AS product_name, p.released_at,
-                  ci.image_url, ci.scan_url, ci.scan_thumb_url,
+                  ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+                  ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                  ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                   latest_price.tcgplayer_url, latest_price.market_price, latest_price.low_price, latest_price.mid_price, latest_price.high_price,
                   ci.label, ci.variant_index,
                   ci.artist,
@@ -845,7 +848,10 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
 
     const [images, legality, cardBans, languages] = await Promise.all([
       runQuery<CardImageRow>(
-        `SELECT ci.card_id, c.card_number, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
+        `SELECT ci.card_id, c.card_number, ci.variant_index,
+                ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,
                 ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
@@ -1001,7 +1007,10 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
 
     const [images, legality, cardBans, languages] = await Promise.all([
       runQuery<CardImageRow>(
-        `SELECT ci.card_id, c.card_number, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url,
+        `SELECT ci.card_id, c.card_number, ci.variant_index,
+                ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,
                 ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,

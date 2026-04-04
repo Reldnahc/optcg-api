@@ -2,6 +2,7 @@ import { DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand, S3Client 
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
+import { syncCardImageAsset } from "../cardImageAssets.js";
 import { getScanIngestS3Config } from "./config.js";
 import { hasRunningTask, runConfiguredTask } from "./tasks.js";
 
@@ -1300,6 +1301,31 @@ export async function adminScansRoutes(app: FastifyInstance) {
         Boolean(image.existing_scan_source_s3_key || image.existing_scan_url),
       ],
     );
+
+    await Promise.all([
+      syncCardImageAsset({
+        cardImageId: image.card_image_id,
+        role: "scan_source",
+        storageKey: item.processed_s3_key,
+        publicUrl: item.processed_url,
+      }),
+      syncCardImageAsset({
+        cardImageId: image.card_image_id,
+        role: "scan_url",
+        publicUrl: null,
+      }),
+      syncCardImageAsset({
+        cardImageId: image.card_image_id,
+        role: "scan_thumb",
+        storageKey: null,
+        publicUrl: null,
+      }),
+      syncCardImageAsset({
+        cardImageId: image.card_image_id,
+        role: "scan_display",
+        publicUrl: null,
+      }),
+    ]);
 
     const updated = await query<{
       id: string;

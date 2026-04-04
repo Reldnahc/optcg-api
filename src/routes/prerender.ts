@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { cardImageAssetPublicUrlSql, compareVariantDisplayOrder, thumbnailUrl, setName } from "../format.js";
+import { cardImageAssetPublicUrlSql, compareVariantDisplayOrder, publicScanUrlSql, thumbnailUrl, setName } from "../format.js";
 import { formatBlockAllowedSql, formatCardBlockLegalSql } from "../formatLegality.js";
 import { prerenderManifestRouteSchema } from "../schemas/public.js";
 
@@ -358,7 +358,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
       query<CardVariantRow>(
         `SELECT ci.card_id, ci.variant_index, ci.label, ci.artist,
                 ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
-                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
                 ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.classified, ip.name AS product_name, ip.product_set_code, ip.released_at AS product_released_at,
                 canonical_tp.tcgplayer_url AS canonical_tcgplayer_url,

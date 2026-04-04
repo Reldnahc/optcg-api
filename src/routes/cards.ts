@@ -33,6 +33,7 @@ import {
   CardRow,
   compareVariantDisplayOrder,
   cardImageAssetPublicUrlSql,
+  publicScanUrlSql,
   labelOrder,
   LABEL_ORDER_SQL,
   bestImageSubquery,
@@ -673,7 +674,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         }>(
           `SELECT c.*, p.name AS product_name, p.released_at,
                   ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
-                  ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                  ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
                   ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                   latest_price.tcgplayer_url, latest_price.market_price, latest_price.low_price, latest_price.mid_price, latest_price.high_price,
                   ci.label, ci.variant_index,
@@ -850,7 +851,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       runQuery<CardImageRow>(
         `SELECT ci.card_id, c.card_number, ci.variant_index,
                 ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
-                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
                 ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,
@@ -1009,7 +1010,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       runQuery<CardImageRow>(
         `SELECT ci.card_id, c.card_number, ci.variant_index,
                 ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
-                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_url,
+                ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
                 ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
                 ci.artist,
                 ci.label, ci.classified,

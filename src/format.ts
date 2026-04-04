@@ -42,6 +42,17 @@ export function cardImageAssetPublicUrlSql(
   ), ${fallbackExpr})`;
 }
 
+export function publicScanUrlSql(cardImageIdExpr: string, fallbackExpr: string): string {
+  return `COALESCE(
+    (SELECT cia.public_url
+     FROM card_image_assets cia
+     WHERE cia.card_image_id = ${cardImageIdExpr}
+       AND cia.role = 'scan_display'
+     LIMIT 1),
+    ${cardImageAssetPublicUrlSql(cardImageIdExpr, "scan_url", fallbackExpr)}
+  )`;
+}
+
 /** SQL expression for the public card-page variant ordering. */
 export function variantDisplayOrderSql(cardImageAlias: string, productAlias: string): string {
   return [
@@ -85,7 +96,7 @@ export function bestImageSubquery(cardIdExpr: string): string {
 
 /** SQL subquery to get the best scan_url for a card using the same best-variant ordering. */
 export function bestScanUrlSubquery(cardIdExpr: string): string {
-  return `(SELECT ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} FROM card_images ci
+  return `(SELECT ${publicScanUrlSql("ci.id", "ci.scan_url")} FROM card_images ci
     LEFT JOIN products ip ON ip.id = ci.product_id
     WHERE ci.card_id = ${cardIdExpr} AND ci.classified = true
     ORDER BY ${variantDisplayOrderSql("ci", "ip")} LIMIT 1)`;

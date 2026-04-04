@@ -83,8 +83,8 @@ async function syncManualVariantAssets(image: {
   image_url: string | null;
   source_url: string | null;
   scan_url: string | null;
-}) {
-  await Promise.all([
+}, options?: { resetDerivedScanAssets?: boolean }) {
+  const writes = [
     syncCardImageAsset({
       cardImageId: image.id,
       role: "image_url",
@@ -96,7 +96,25 @@ async function syncManualVariantAssets(image: {
       role: "scan_url",
       publicUrl: image.scan_url,
     }),
-  ]);
+  ];
+
+  if (options?.resetDerivedScanAssets) {
+    writes.push(
+      syncCardImageAsset({
+        cardImageId: image.id,
+        role: "scan_display",
+        publicUrl: null,
+      }),
+      syncCardImageAsset({
+        cardImageId: image.id,
+        role: "scan_thumb",
+        storageKey: null,
+        publicUrl: null,
+      }),
+    );
+  }
+
+  await Promise.all(writes);
 }
 
 async function getCardRecord(cardNumber: string, language: string) {
@@ -975,6 +993,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     }
 
     const fields: Array<{ column: string; value: unknown }> = [];
+    let resetDerivedScanAssets = false;
 
     try {
       const label = asOptionalString(body.label, "label");
@@ -987,7 +1006,10 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       }
 
       const scanUrl = asOptionalString(body.scan_url, "scan_url");
-      if (scanUrl !== undefined) fields.push({ column: "scan_url", value: scanUrl });
+      if (scanUrl !== undefined) {
+        fields.push({ column: "scan_url", value: scanUrl });
+        resetDerivedScanAssets = true;
+      }
 
       const sourceUrl = asOptionalString(body.source_url, "source_url");
       if (sourceUrl !== undefined) fields.push({ column: "source_url", value: sourceUrl });
@@ -1031,7 +1053,9 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       params,
     );
 
-    await syncManualVariantAssets(updated.rows[0]);
+    await syncManualVariantAssets(updated.rows[0], {
+      resetDerivedScanAssets,
+    });
     return { data: updated.rows[0] };
   });
 
@@ -1200,7 +1224,9 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         [card.id, productId, variantIndex, imageUrl, sourceUrl, scanUrl, artist, label, classified],
       );
 
-      await syncManualVariantAssets(inserted.rows[0]);
+      await syncManualVariantAssets(inserted.rows[0], {
+        resetDerivedScanAssets: scanUrl !== null,
+      });
       return { data: inserted.rows[0] };
     } catch (error: any) {
       if (reply.sent) return;

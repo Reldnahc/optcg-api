@@ -699,7 +699,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       ]);
       const total = parseInt(countResult.rows[0].total, 10);
 
-      reply.header("Cache-Control", "public, max-age=3600");
+      reply.header("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
       return {
         data: rows.rows.map((row) => ({
           ...formatCard(row),
@@ -809,7 +809,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       params,
     );
 
-    reply.header("Cache-Control", "public, max-age=3600");
+    reply.header("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     return { data: rows.rows.map((r: { name: string }) => r.name) };
   });
 
@@ -842,7 +842,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       .filter((row): row is CardDetailRow => Boolean(row));
 
     if (foundCards.length === 0) {
-      reply.header("Cache-Control", "public, max-age=86400");
+      reply.header("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
       return {
         data: {},
         missing: requestedCardNumbers,
@@ -957,7 +957,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       ];
     }));
 
-    reply.header("Cache-Control", "public, max-age=86400");
+    reply.header("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     return {
       data,
       missing: requestedCardNumbers.filter((cardNumber) => !cardsByNumber.has(cardNumber)),

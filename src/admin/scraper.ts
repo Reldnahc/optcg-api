@@ -493,11 +493,12 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     const body = (req.body ?? {}) as {
       language?: unknown;
       s3?: unknown;
+      storage?: unknown;
       confirm?: unknown;
     };
 
     const language = typeof body.language === "string" ? body.language.trim().toLowerCase() : "";
-    const wipeS3 = body.s3 === true;
+    const wipeStorage = body.storage === true || body.s3 === true;
     const confirm = typeof body.confirm === "string" ? body.confirm.trim() : "";
 
     if (confirm !== "WIPE") {
@@ -514,7 +515,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
     if (language) {
       command.push("--lang", language);
     }
-    if (wipeS3) {
+    if (wipeStorage) {
       command.push("--s3");
     }
 
@@ -522,7 +523,7 @@ export async function adminScraperRoutes(app: FastifyInstance) {
       const result = await runConfiguredTask("WIPE", { command });
       return { data: result };
     } catch (error: any) {
-      req.log.error({ err: error, language, wipeS3, command }, "Failed to start wipe task");
+      req.log.error({ err: error, language, wipeStorage, command }, "Failed to start wipe task");
       reply.code(501);
       return { error: { status: 501, message: error.message } };
     }

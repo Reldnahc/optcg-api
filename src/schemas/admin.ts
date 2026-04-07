@@ -316,3 +316,32 @@ export const adminRunDbMigrateRouteSchema = {
     501: errorEnvelopeSchema,
   },
 };
+
+export const adminCreateDbSnapshotRouteSchema = {
+  tags: ["Admin Tasks"],
+  summary: "Create RDS DB snapshot",
+  security: adminSecurity,
+  body: {
+    type: "object",
+    additionalProperties: false,
+    required: ["confirm"],
+    properties: {
+      confirm: { type: "string", const: "SNAPSHOT" },
+    },
+  },
+  response: {
+    200: okEnvelopeSchema({
+      type: "object",
+      additionalProperties: false,
+      required: ["snapshot_id", "db_instance_identifier", "status", "arn"],
+      properties: {
+        snapshot_id: { type: "string" },
+        db_instance_identifier: { type: "string" },
+        status: { type: "string" },
+        arn: nullable({ type: "string" }),
+      },
+    }),
+    400: errorEnvelopeSchema,
+    501: errorEnvelopeSchema,
+  },
+};

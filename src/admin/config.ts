@@ -30,6 +30,10 @@ export function getAdminPasswordHash(): string {
   return requireEnv("ADMIN_PASSWORD_HASH");
 }
 
+export function getDbInstanceIdentifier(): string {
+  return requireEnv("DB_INSTANCE_IDENTIFIER");
+}
+
 export function getAdminTokenTtlSeconds(): number {
   const raw = process.env.ADMIN_TOKEN_TTL_SECONDS;
   const parsed = raw ? parseInt(raw, 10) : 43_200;

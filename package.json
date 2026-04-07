@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-ecs": "^3.1016.0",
+    "@aws-sdk/client-rds": "^3.1025.0",
     "@aws-sdk/client-s3": "^3.1016.0",
     "@aws-sdk/s3-request-presigner": "^3.1019.0",
     "dotenv": "^17.3.1",

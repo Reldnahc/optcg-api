@@ -46,6 +46,7 @@ export interface EcsTaskConfig {
 }
 
 export type EcsTaskPrefix =
+  | "DB_MIGRATE"
   | "SCRAPER"
   | "PRICES"
   | "WATCHER"

@@ -296,3 +296,23 @@ export const adminRunPricesRouteSchema = {
     501: errorEnvelopeSchema,
   },
 };
+
+export const adminRunDbMigrateRouteSchema = {
+  tags: ["Admin Tasks"],
+  summary: "Start DB migration task",
+  security: adminSecurity,
+  body: {
+    type: "object",
+    additionalProperties: false,
+    required: ["confirm"],
+    properties: {
+      confirm: { type: "string", const: "MIGRATE" },
+    },
+  },
+  response: {
+    200: okEnvelopeSchema(taskResultSchema),
+    400: errorEnvelopeSchema,
+    409: errorEnvelopeSchema,
+    501: errorEnvelopeSchema,
+  },
+};

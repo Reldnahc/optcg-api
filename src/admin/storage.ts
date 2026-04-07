@@ -35,10 +35,6 @@ export async function adminStorageRoutes(app: FastifyInstance) {
         new CreateDBSnapshotCommand({
           DBInstanceIdentifier: dbInstanceIdentifier,
           DBSnapshotIdentifier: snapshotId,
-          Tags: [
-            { Key: "Name", Value: snapshotId },
-            { Key: "CreatedBy", Value: "admin-storage-page" },
-          ],
         }),
       );
 

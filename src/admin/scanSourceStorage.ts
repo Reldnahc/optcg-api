@@ -1,43 +1,41 @@
-import { CopyObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getScanIngestS3Config } from "./config.js";
+import { CopyObjectCommand } from "@aws-sdk/client-s3";
+import {
+  buildPublicUrl,
+  extractImageExtension,
+  getS3Client,
+  getStorageConfig,
+  scanSourceKey,
+} from "../storage.js";
 
-let s3Client: S3Client | null = null;
-
-function getS3Client(region: string): S3Client {
-  if (!s3Client) {
-    s3Client = new S3Client({ region });
-  }
-  return s3Client;
-}
-
-function extractImageExtension(value: string | null | undefined): string {
-  const normalized = (value ?? "").split("?")[0].trim().toLowerCase();
-  if (normalized.endsWith(".jpg")) return ".jpg";
-  if (normalized.endsWith(".jpeg")) return ".jpeg";
-  if (normalized.endsWith(".webp")) return ".webp";
-  return ".png";
-}
-
-function buildPublicUrl(baseUrl: string, key: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}/${key}`;
-}
-
-export function buildCanonicalScanSourceKey(cardImageId: string, sourceKeyOrUrl?: string | null): string {
+export function buildCanonicalScanSourceKey(
+  cardNumber: string,
+  language: string,
+  variantIndex: number,
+  sourceKeyOrUrl?: string | null,
+): string {
   const extension = extractImageExtension(sourceKeyOrUrl);
-  return `card-images/${cardImageId}/scan_source/scan-source${extension}`;
+  return scanSourceKey(cardNumber, language, variantIndex, extension);
 }
 
+/**
+ * Copy a freshly-uploaded scan to the canonical card-keyed location.
+ * Caller passes (card_number, language, variant_index) — these are always
+ * available at the link site (the user is explicitly assigning the scan to
+ * a card variant).
+ */
 export async function copyScanSourceToCanonicalLocation(
-  cardImageId: string,
+  cardNumber: string,
+  language: string,
+  variantIndex: number,
   sourceKey: string,
 ): Promise<{ storageKey: string; publicUrl: string }> {
-  const s3 = getScanIngestS3Config();
-  const destinationKey = buildCanonicalScanSourceKey(cardImageId, sourceKey);
+  const cfg = getStorageConfig();
+  const destinationKey = buildCanonicalScanSourceKey(cardNumber, language, variantIndex, sourceKey);
 
   if (sourceKey !== destinationKey) {
-    await getS3Client(s3.region).send(new CopyObjectCommand({
-      Bucket: s3.bucket,
-      CopySource: `${s3.bucket}/${sourceKey.split("/").map(encodeURIComponent).join("/")}`,
+    await getS3Client().send(new CopyObjectCommand({
+      Bucket: cfg.bucket,
+      CopySource: `${cfg.bucket}/${sourceKey.split("/").map(encodeURIComponent).join("/")}`,
       Key: destinationKey,
       MetadataDirective: "COPY",
     }));
@@ -45,6 +43,6 @@ export async function copyScanSourceToCanonicalLocation(
 
   return {
     storageKey: destinationKey,
-    publicUrl: buildPublicUrl(s3.publicBaseUrl, destinationKey),
+    publicUrl: buildPublicUrl(destinationKey),
   };
 }

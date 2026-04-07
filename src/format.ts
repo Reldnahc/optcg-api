@@ -128,8 +128,7 @@ export function thumbnailUrl(imageUrl: string | null): string | null {
     const url = new URL(imageUrl);
     const hostname = url.hostname.toLowerCase();
     if (
-      url.pathname.includes("/thumbs/")
-      || url.search
+      url.search
       || hostname.includes("discordapp.com")
       || hostname.includes("discordapp.net")
       || hostname.includes("discord.com")
@@ -137,16 +136,23 @@ export function thumbnailUrl(imageUrl: string | null): string | null {
       return imageUrl;
     }
 
-    const slashIndex = url.pathname.lastIndexOf("/");
-    if (slashIndex === -1) return null;
+    // Already a thumb under the new layout (.../thumb.webp).
+    if (/\/thumb\.webp$/i.test(url.pathname)) {
+      return imageUrl;
+    }
 
-    const dir = url.pathname.slice(0, slashIndex);
-    const filename = url.pathname.slice(slashIndex + 1);
-    const dotIndex = filename.lastIndexOf(".");
-    const basename = dotIndex === -1 ? filename : filename.slice(0, dotIndex);
+    // New canonical layout: images/{CARD}/{lang}/stock/{variant}/full.png
+    //   → images/{CARD}/{lang}/stock/{variant}/thumb.webp
+    // Same for scans/.
+    const newLayoutMatch = url.pathname.match(
+      /^(.*\/images\/[^/]+\/[^/]+\/(?:stock|scans)\/\d+)\/full\.(?:png|jpg|jpeg|webp)$/i,
+    );
+    if (newLayoutMatch) {
+      url.pathname = `${newLayoutMatch[1]}/thumb.webp`;
+      return url.toString();
+    }
 
-    url.pathname = `${dir}/thumbs/${basename}.webp`;
-    return url.toString();
+    return null;
   } catch {
     return null;
   }

@@ -56,42 +56,33 @@ export type EcsTaskPrefix =
   | "WIPE"
   | "VARIANT_MERGE";
 
-function trimTrailingSlashes(value: string): string {
-  return value.replace(/\/+$/, "");
-}
+import {
+  INGEST_CROPS_PREFIX,
+  INGEST_RAW_PREFIX,
+  getStorageConfig,
+} from "../storage.js";
 
-function defaultS3PublicBaseUrl(bucket: string, region: string): string {
-  if (region === "us-east-1") {
-    return `https://${bucket}.s3.amazonaws.com`;
-  }
-  return `https://${bucket}.s3.${region}.amazonaws.com`;
-}
-
-export function getScanIngestS3Config(): {
+/**
+ * Image storage view used by the admin scan-ingest routes.
+ * Single bucket, single base URL — see ../storage.ts for the source of truth.
+ *
+ * `rawPrefix` and `processedPrefix` are the temporary holding areas under
+ * `images/_ingest/...` (subject to daily GC, see optcg-data/src/cli/gc-ingest.ts).
+ */
+export function getImageStorageConfig(): {
   bucket: string;
   region: string;
   publicBaseUrl: string;
   rawPrefix: string;
   processedPrefix: string;
 } {
-  const region = process.env.AWS_REGION || "us-east-1";
-  const bucket = process.env.SCAN_INGEST_S3_BUCKET || process.env.S3_IMAGE_BUCKET;
-  if (!bucket) {
-    throw new Error("Missing required environment variable: SCAN_INGEST_S3_BUCKET or S3_IMAGE_BUCKET");
-  }
-
-  const publicBaseUrl = trimTrailingSlashes(
-    process.env.SCAN_INGEST_S3_PUBLIC_BASE_URL
-      || process.env.S3_PUBLIC_BASE_URL
-      || defaultS3PublicBaseUrl(bucket, region),
-  );
-
+  const cfg = getStorageConfig();
   return {
-    bucket,
-    region,
-    publicBaseUrl,
-    rawPrefix: trimTrailingSlashes(process.env.SCAN_INGEST_S3_RAW_PREFIX || "scan-ingest/raw"),
-    processedPrefix: trimTrailingSlashes(process.env.SCAN_INGEST_S3_PROCESSED_PREFIX || "scan-ingest/processed"),
+    bucket: cfg.bucket,
+    region: cfg.region,
+    publicBaseUrl: cfg.publicBaseUrl,
+    rawPrefix: INGEST_RAW_PREFIX,
+    processedPrefix: INGEST_CROPS_PREFIX,
   };
 }
 

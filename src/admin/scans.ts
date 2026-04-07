@@ -1,9 +1,10 @@
-import { DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
 import { syncCardImageAsset } from "../cardImageAssets.js";
-import { getScanIngestS3Config } from "./config.js";
+import { getS3Client } from "../storage.js";
+import { getImageStorageConfig } from "./config.js";
 import { copyScanSourceToCanonicalLocation } from "./scanSourceStorage.js";
 import { hasRunningTask, runConfiguredTask } from "./tasks.js";
 
@@ -32,15 +33,6 @@ interface PreparedScanItemInput {
   footer_crop_s3_key: string | null;
   footer_crop_url: string | null;
   error: string | null;
-}
-
-let s3Client: S3Client | null = null;
-
-function getS3Client(region: string): S3Client {
-  if (!s3Client) {
-    s3Client = new S3Client({ region });
-  }
-  return s3Client;
 }
 
 function buildPublicUrl(baseUrl: string, key: string): string {
@@ -149,8 +141,8 @@ async function loadBatchForUpload(batchId: string): Promise<{ id: string; langua
 async function deleteScanAssetKeys(keys: string[]): Promise<void> {
   if (keys.length === 0) return;
 
-  const s3 = getScanIngestS3Config();
-  const client = getS3Client(s3.region);
+  const s3 = getImageStorageConfig();
+  const client = getS3Client();
 
   for (let i = 0; i < keys.length; i += 1000) {
     const batch = keys.slice(i, i + 1000);
@@ -271,8 +263,8 @@ async function syncBatchFilesFromS3(batchId: string): Promise<void> {
   const batch = await loadBatchForUpload(batchId);
   if (!batch) return;
 
-  const s3 = getScanIngestS3Config();
-  const client = getS3Client(s3.region);
+  const s3 = getImageStorageConfig();
+  const client = getS3Client();
   const prefix = `${batch.raw_prefix}/${batch.id}/`;
   const listed = await client.send(new ListObjectsV2Command({
     Bucket: s3.bucket,
@@ -409,7 +401,7 @@ export async function adminScansRoutes(app: FastifyInstance) {
       return { error: { status: 400, message: "language must be en, ja, fr, or zh" } };
     }
 
-    const s3 = getScanIngestS3Config();
+    const s3 = getImageStorageConfig();
     const inserted = await query<{
       id: string;
       language: string;
@@ -460,8 +452,8 @@ export async function adminScansRoutes(app: FastifyInstance) {
 
       const safeName = fileName.replace(/[^A-Za-z0-9._-]+/g, "_");
       const key = `${batch.raw_prefix}/${batch.id}/${Date.now()}-${safeName}`;
-      const s3 = getScanIngestS3Config();
-      const client = getS3Client(s3.region);
+      const s3 = getImageStorageConfig();
+      const client = getS3Client();
       const uploadUrl = await getSignedUrl(
         client,
         new PutObjectCommand({
@@ -518,8 +510,8 @@ export async function adminScansRoutes(app: FastifyInstance) {
       const key = safeFolder
         ? `${batch.rows[0].processed_prefix}/${batch_id}/${safeFolder}/${safeName}`
         : `${batch.rows[0].processed_prefix}/${batch_id}/${safeName}`;
-      const s3 = getScanIngestS3Config();
-      const client = getS3Client(s3.region);
+      const s3 = getImageStorageConfig();
+      const client = getS3Client();
       const uploadUrl = await getSignedUrl(
         client,
         new PutObjectCommand({
@@ -571,8 +563,8 @@ export async function adminScansRoutes(app: FastifyInstance) {
         const buffer = decodeBase64Payload(dataBase64);
         const safeName = fileName.replace(/[^A-Za-z0-9._-]+/g, "_");
         key = `${batch.raw_prefix}/${batch.id}/${Date.now()}-${safeName}`;
-        const s3 = getScanIngestS3Config();
-        const client = getS3Client(s3.region);
+        const s3 = getImageStorageConfig();
+        const client = getS3Client();
 
         await client.send(
           new PutObjectCommand({
@@ -1267,7 +1259,9 @@ export async function adminScansRoutes(app: FastifyInstance) {
 
     const image = imageResult.rows[0];
     const canonicalScanSource = await copyScanSourceToCanonicalLocation(
-      image.card_image_id,
+      cardNumberInput,
+      language,
+      variantIndex,
       item.processed_s3_key,
     );
 

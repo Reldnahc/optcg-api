@@ -121,6 +121,107 @@ export function bestArtistSubquery(cardIdExpr: string): string {
     LIMIT 1)`;
 }
 
+/**
+ * Shape of a row from a card_images query joined with product + price data,
+ * as consumed by buildVariant() to produce the unified variant object.
+ */
+export interface VariantRow {
+  variant_index: number;
+  name?: string | null;
+  label: string | null;
+  artist: string | null;
+  image_url: string | null;
+  image_thumb_url?: string | null;
+  scan_display_url: string | null;
+  scan_full_url: string | null;
+  scan_thumb_url: string | null;
+  product_name: string | null;
+  product_set_code: string | null;
+  product_released_at: string | null;
+  tcgplayer_url: string | null;
+  market_price: string | null;
+  low_price: string | null;
+  mid_price: string | null;
+  high_price: string | null;
+}
+
+/** The unified per-variant object emitted by both detail and search endpoints. */
+export interface CardVariant {
+  index: number;
+  name: string | null;
+  label: string | null;
+  artist: string | null;
+  product: {
+    name: string | null;
+    set_code: string | null;
+    released_at: string | null;
+  };
+  images: {
+    stock: {
+      full: string | null;
+      thumb: string | null;
+    };
+    scan: {
+      display: string | null;
+      full: string | null;
+      thumb: string | null;
+    };
+  };
+  market: {
+    tcgplayer_url: string | null;
+    market_price: string | null;
+    low_price: string | null;
+    mid_price: string | null;
+    high_price: string | null;
+  };
+}
+
+/**
+ * Map a card_images+product+price row to the unified variant object.
+ *
+ * Field naming aligns with migration 026_rewrite_image_urls_to_r2.sql:
+ * - images.stock.{full,thumb} → role image_url / image_thumb
+ * - images.scan.{display,full,thumb} → role scan_display / scan_url / scan_thumb
+ *
+ * The Normal/Foil sub_type wrapper from the old detail shape is dropped —
+ * OPTCG prints are exclusively one sub_type per printing, so the single
+ * price row returned by the caller's price join is the variant's price.
+ */
+export function buildVariant(row: VariantRow): CardVariant {
+  const stockFull = row.image_url;
+  const stockThumb = row.image_thumb_url ?? thumbnailUrl(stockFull);
+
+  return {
+    index: row.variant_index,
+    name: row.name ?? null,
+    label: row.label,
+    artist: row.artist,
+    product: {
+      name: row.product_name,
+      set_code: row.product_set_code,
+      released_at: row.product_released_at,
+    },
+    images: {
+      stock: {
+        full: stockFull,
+        thumb: stockThumb,
+      },
+      scan: {
+        display: row.scan_display_url,
+        full: row.scan_full_url,
+        thumb: row.scan_thumb_url,
+      },
+    },
+    market: {
+      tcgplayer_url: row.tcgplayer_url,
+      market_price: row.market_price,
+      low_price: row.low_price,
+      mid_price: row.mid_price,
+      high_price: row.high_price,
+    },
+  };
+}
+
 export function thumbnailUrl(imageUrl: string | null): string | null {
   if (!imageUrl) return null;
 

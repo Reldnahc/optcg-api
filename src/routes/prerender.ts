@@ -46,6 +46,7 @@ interface CardBaseRow {
 interface CardVariantRow {
   card_id: string;
   variant_index: number;
+  name: string | null;
   label: string | null;
   artist: string | null;
   image_url: string | null;
@@ -247,6 +248,7 @@ function cardRoutePayload(
 
       return {
         variant_index: variant.variant_index,
+        name: variant.name,
         label: variant.label,
         artist: variant.artist,
         product: {
@@ -359,7 +361,7 @@ export async function prerenderRoutes(app: FastifyInstance) {
          ORDER BY c.card_number ASC`,
       ),
       query<CardVariantRow>(
-        `SELECT ci.card_id, ci.variant_index, ci.label, ci.artist,
+        `SELECT ci.card_id, ci.variant_index, ci.name, ci.label, ci.artist,
                 ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
                 ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_url,
                 ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_download_url,

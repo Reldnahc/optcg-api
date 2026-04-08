@@ -1,6 +1,5 @@
 import {
   cardNumberParamSchema,
-  cardSummarySchema,
   donIdParamSchema,
   errorEnvelopeSchema,
   formatNameParamSchema,
@@ -149,24 +148,52 @@ const donCardSchema = {
   },
 };
 
-const cardSummaryRequired = [...
-  (((cardSummarySchema as unknown) as { required?: string[] }).required ?? []),
+/**
+ * Card body fields shared by all endpoints. Excludes legacy top-level
+ * media/price fields (those now live under each variant).
+ */
+const cardBodyRequired = [
+  "card_number",
+  "name",
+  "language",
+  "set",
+  "set_name",
+  "released_at",
+  "released",
+  "card_type",
+  "rarity",
+  "color",
+  "cost",
+  "power",
+  "counter",
+  "life",
+  "attribute",
+  "types",
+  "effect",
+  "trigger",
+  "block",
 ];
 
-const cardSummaryProperties = {
-  ...((((cardSummarySchema as unknown) as { properties?: Record<string, unknown> }).properties) ?? {}),
-};
-
-const cardPrintSummarySchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [...cardSummaryRequired, "label", "variant_index", "variant_product_name"],
-  properties: {
-    ...cardSummaryProperties,
-    label: nullable({ type: "string" }),
-    variant_index: { type: "integer" },
-    variant_product_name: nullable({ type: "string" }),
-  },
+const cardBodyProperties = {
+  card_number: { type: "string" },
+  name: { type: "string" },
+  language: { type: "string" },
+  set: { type: "string" },
+  set_name: { type: "string" },
+  released_at: nullable({ type: "string", format: "date-time" }),
+  released: { type: "boolean" },
+  card_type: { type: "string" },
+  rarity: nullable({ type: "string" }),
+  color: { type: "array", items: { type: "string" } },
+  cost: nullable({ type: "integer" }),
+  power: nullable({ type: "integer" }),
+  counter: nullable({ type: "integer" }),
+  life: nullable({ type: "integer" }),
+  attribute: nullable({ type: "array", items: { type: "string" } }),
+  types: { type: "array", items: { type: "string" } },
+  effect: nullable({ type: "string" }),
+  trigger: nullable({ type: "string" }),
+  block: nullable({ type: "string" }),
 };
 
 const scanProgressGroupSchema = {
@@ -363,32 +390,60 @@ const cardSearchQuerySchema = {
       ],
     },
     order: { type: "string", enum: ["asc", "desc"] },
-    unique: { type: "string", enum: ["cards", "prints"] },
+    collapse: { type: "string", enum: ["card", "variant"] },
     page: { type: "string" },
     limit: { type: "string" },
     lang: { type: "string" },
   },
 };
 
-const variantMarketPriceSchema = {
+const variantMarketSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["market_price", "low_price", "mid_price", "high_price", "tcgplayer_url"],
+  required: ["tcgplayer_url", "market_price", "low_price", "mid_price", "high_price"],
   properties: {
+    tcgplayer_url: nullable({ type: "string" }),
     market_price: nullable({ type: "string" }),
     low_price: nullable({ type: "string" }),
     mid_price: nullable({ type: "string" }),
     high_price: nullable({ type: "string" }),
-    tcgplayer_url: nullable({ type: "string" }),
+  },
+};
+
+const variantImagesSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["stock", "scan"],
+  properties: {
+    stock: {
+      type: "object",
+      additionalProperties: false,
+      required: ["full", "thumb"],
+      properties: {
+        full: nullable({ type: "string" }),
+        thumb: nullable({ type: "string" }),
+      },
+    },
+    scan: {
+      type: "object",
+      additionalProperties: false,
+      required: ["display", "full", "thumb"],
+      properties: {
+        display: nullable({ type: "string" }),
+        full: nullable({ type: "string" }),
+        thumb: nullable({ type: "string" }),
+      },
+    },
   },
 };
 
 const cardVariantSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["variant_index", "label", "artist", "product", "media", "market"],
+  required: ["index", "name", "label", "artist", "product", "images", "market"],
   properties: {
-    variant_index: { type: "integer" },
+    index: { type: "integer" },
+    name: nullable({ type: "string" }),
     label: nullable({ type: "string" }),
     artist: nullable({ type: "string" }),
     product: {
@@ -401,30 +456,25 @@ const cardVariantSchema = {
         released_at: nullable({ type: "string", format: "date-time" }),
       },
     },
-    media: {
-      type: "object",
-      additionalProperties: false,
-      required: ["image_url", "image_thumb_url", "thumbnail_url", "scan_url", "scan_download_url", "scan_thumbnail_url"],
-      properties: {
-        image_url: nullable({ type: "string" }),
-        image_thumb_url: nullable({ type: "string" }),
-        thumbnail_url: nullable({ type: "string" }),
-        scan_url: nullable({ type: "string" }),
-        scan_download_url: nullable({ type: "string" }),
-        scan_thumbnail_url: nullable({ type: "string" }),
-      },
-    },
-    market: {
-      type: "object",
-      additionalProperties: false,
-      required: ["tcgplayer_url", "prices"],
-      properties: {
-        tcgplayer_url: nullable({ type: "string" }),
-        prices: {
-          type: "object",
-          additionalProperties: variantMarketPriceSchema,
-        },
-      },
+    images: variantImagesSchema,
+    market: variantMarketSchema,
+  },
+};
+
+/**
+ * Unified card item used by search. Card body + array of matching variants.
+ * In search (collapse=card) variants[] contains only the prints that matched
+ * the query filters; in collapse=variant it contains exactly one entry.
+ */
+const cardItemSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [...cardBodyRequired, "variants"],
+  properties: {
+    ...cardBodyProperties,
+    variants: {
+      type: "array",
+      items: cardVariantSchema,
     },
   },
 };
@@ -445,12 +495,16 @@ const cardLegalitySchema = {
   },
 };
 
-const cardDetailSchema = {
+/**
+ * Card item plus legality + available_languages. Used by the detail and
+ * batch endpoints where per-card format legality is relevant.
+ */
+const cardDetailItemSchema = {
   type: "object",
   additionalProperties: false,
-  required: [...cardSummaryRequired, "variants", "legality", "available_languages"],
+  required: [...cardBodyRequired, "variants", "legality", "available_languages"],
   properties: {
-    ...cardSummaryProperties,
+    ...cardBodyProperties,
     variants: {
       type: "array",
       items: cardVariantSchema,
@@ -595,7 +649,7 @@ export const randomRouteSchema = {
     },
   },
   response: {
-    200: okEnvelopeSchema(cardSummarySchema),
+    200: okEnvelopeSchema(cardItemSchema),
     400: errorEnvelopeSchema,
     404: errorEnvelopeSchema,
   },
@@ -604,15 +658,10 @@ export const randomRouteSchema = {
 export const cardsSearchRouteSchema = {
   tags: ["Cards"],
   summary: "Search cards",
-  description: "Supports two result modes. `unique=cards` returns card-level rows. `unique=prints` returns classified variant rows. The `meta` object reports the requested sort and the sort that was actually applied after any relevance fallback.",
+  description: "Returns card items carrying an array of matching variants. `collapse=card` (default) returns one item per matching card, with `variants[]` filtered to only the prints that matched the query's variant-level predicates (is:sp, label:, artist:, etc.). `collapse=variant` returns one item per matching print — the same card appears multiple times if multiple variants match, each with a single-element `variants[]`. The `meta` object reports the requested sort and the sort that was actually applied after any relevance fallback.",
   querystring: cardSearchQuerySchema,
   response: {
-    200: {
-      oneOf: [
-        cardSearchEnvelopeSchema(cardSummarySchema),
-        cardSearchEnvelopeSchema(cardPrintSummarySchema),
-      ],
-    },
+    200: cardSearchEnvelopeSchema(cardItemSchema),
     400: errorEnvelopeSchema,
   },
 };
@@ -639,7 +688,7 @@ export const cardDetailRouteSchema = {
   params: cardNumberParamSchema,
   querystring: languageQuerySchema,
   response: {
-    200: okEnvelopeSchema(cardDetailSchema),
+    200: okEnvelopeSchema(cardDetailItemSchema),
     404: errorEnvelopeSchema,
   },
 };
@@ -669,7 +718,7 @@ export const cardBatchRouteSchema = {
       properties: {
         data: {
           type: "object",
-          additionalProperties: cardDetailSchema,
+          additionalProperties: cardDetailItemSchema,
         },
         missing: {
           type: "array",

@@ -3,8 +3,8 @@ import { labelOrder } from "../dist/format.js";
 import { createCardRow, withCardsApp } from "./helpers/cardsTestUtils.mjs";
 
 function compareVariants(a, b) {
-  const hasImageA = !!a.media.image_url;
-  const hasImageB = !!b.media.image_url;
+  const hasImageA = !!a.images.stock.full;
+  const hasImageB = !!b.images.stock.full;
   if (hasImageA !== hasImageB) return hasImageA ? -1 : 1;
 
   const dateA = a.product.released_at;
@@ -16,7 +16,7 @@ function compareVariants(a, b) {
   const labelDiff = labelOrder(a.label) - labelOrder(b.label);
   if (labelDiff !== 0) return labelDiff;
 
-  return a.variant_index - b.variant_index;
+  return a.index - b.index;
 }
 
 const { app, assertDone } = await withCardsApp([
@@ -35,56 +35,56 @@ const { app, assertDone } = await withCardsApp([
     },
   },
   {
-    match: "SELECT ci.card_id, c.card_number, ci.variant_index, ci.image_url, ci.scan_url, ci.scan_thumb_url",
+    match: "FROM card_images ci",
     result: {
       rows: [
         {
           card_id: "card-1",
           card_number: "OP05-091",
           variant_index: 1,
-          image_url: "https://example.com/variant-1.png",
-          scan_url: "https://example.com/variant-1-scan.png",
-          scan_thumb_url: "https://example.com/variant-1-scan-thumb.webp",
-          artist: "Artist B",
+          name: null,
           label: "Standard",
-          classified: true,
+          artist: "Artist B",
+          image_url: "https://example.com/variant-1.png",
+          image_thumb_url: null,
+          scan_display_url: "https://example.com/variant-1-scan-display.webp",
+          scan_full_url: "https://example.com/variant-1-scan.png",
+          scan_thumb_url: "https://example.com/variant-1-scan-thumb.webp",
           product_name: "Later Product",
           product_set_code: "OP06",
           product_released_at: "2025-03-01T00:00:00.000Z",
-          canonical_tcgplayer_url: "https://example.com/tcgplayer/variant-1",
-          tcgplayer_url: "https://example.com/tcgplayer/variant-1/normal",
+          tcgplayer_url: "https://example.com/tcgplayer/variant-1",
           market_price: "4.00",
           low_price: "3.50",
           mid_price: "4.00",
           high_price: "5.00",
-          sub_type: "Normal",
         },
         {
           card_id: "card-1",
           card_number: "OP05-091",
           variant_index: 0,
-          image_url: null,
-          scan_url: "https://example.com/variant-0-scan.png",
-          scan_thumb_url: "https://example.com/variant-0-scan-thumb.webp",
-          artist: "Artist A",
+          name: "Serialized Winner",
           label: "Alternate Art",
-          classified: true,
+          artist: "Artist A",
+          image_url: null,
+          image_thumb_url: null,
+          scan_display_url: "https://example.com/variant-0-scan-display.webp",
+          scan_full_url: "https://example.com/variant-0-scan.png",
+          scan_thumb_url: "https://example.com/variant-0-scan-thumb.webp",
           product_name: "Earlier Product",
           product_set_code: "OP05",
           product_released_at: "2025-01-01T00:00:00.000Z",
-          canonical_tcgplayer_url: "https://example.com/tcgplayer/variant-0",
-          tcgplayer_url: "https://example.com/tcgplayer/variant-0/foil",
+          tcgplayer_url: "https://example.com/tcgplayer/variant-0",
           market_price: "10.00",
           low_price: "9.00",
           mid_price: "10.00",
           high_price: "12.00",
-          sub_type: "Foil",
         },
       ],
     },
   },
   {
-    match: "COALESCE(BOOL_AND(",
+    match: "COALESCE(BOOL_OR(",
     result: {
       rows: [
         { format_name: "Standard", legal: true },
@@ -117,18 +117,31 @@ try {
   assert.ok(Array.isArray(detailBody.data.available_languages));
   assert.ok(typeof detailBody.data.legality === "object");
 
+  // DB returns variant_index=1 first (has image), variant_index=0 second
+  // (no image). buildVariant should preserve the order as the SQL returned
+  // them (ORDER BY variantDisplayOrderSql), placing image-bearing variant
+  // first.
   assert.equal(detailBody.data.variants[0].product.name, "Later Product");
+  assert.equal(detailBody.data.variants[0].name, null);
   assert.equal(detailBody.data.variants[0].label, "Standard");
 
   if (detailBody.data.variants.length > 0) {
     const firstVariant = detailBody.data.variants[0];
-    assert.ok("variant_index" in firstVariant);
+    assert.ok("index" in firstVariant);
+    assert.ok("name" in firstVariant);
     assert.ok(!("is_default" in firstVariant));
     assert.ok("product" in firstVariant);
-    assert.ok("media" in firstVariant);
+    assert.ok("images" in firstVariant);
     assert.ok("market" in firstVariant);
-    assert.ok("scan_thumbnail_url" in firstVariant.media);
+    assert.ok("stock" in firstVariant.images);
+    assert.ok("scan" in firstVariant.images);
+    assert.ok("full" in firstVariant.images.stock);
+    assert.ok("thumb" in firstVariant.images.stock);
+    assert.ok("display" in firstVariant.images.scan);
+    assert.ok("thumb" in firstVariant.images.scan);
     assert.ok(!("scan_thumb_url" in firstVariant));
+    assert.ok(!("prices" in firstVariant.market));
+    assert.ok("market_price" in firstVariant.market);
 
     const sortedVariants = [...detailBody.data.variants].sort(compareVariants);
     assert.deepEqual(detailBody.data.variants, sortedVariants);

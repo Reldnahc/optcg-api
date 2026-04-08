@@ -77,6 +77,14 @@ interface Ctx {
   unique: string;
 }
 
+function productNameExpr(ctx: Ctx): string {
+  return ctx.unique === "prints" ? "ip.name" : "p.name";
+}
+
+function productReleasedAtExpr(ctx: Ctx): string {
+  return ctx.unique === "prints" ? "ip.released_at" : "p.released_at";
+}
+
 function param(ctx: Ctx, value: unknown): string {
   ctx.params.push(value);
   return `$${ctx.idx++}`;
@@ -125,7 +133,7 @@ function compileNameSearch(value: string, negated: boolean, ctx: Ctx): string {
   const squeezed = param(ctx, `%${squeezeRepeatedChars(normalizedValue)}%`);
   const fuzzySql = `(
     ${squeezedNormalizedTextSql("c.name")} LIKE ${squeezed}
-    OR ${squeezedNormalizedTextSql("p.name")} LIKE ${squeezed}
+    OR ${squeezedNormalizedTextSql(productNameExpr(ctx))} LIKE ${squeezed}
   )`;
 
   const sql = `(
@@ -179,6 +187,7 @@ function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
   const raw = param(ctx, `%${value}%`);
   const normalizedValue = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
   const normalized = normalizedValue ? param(ctx, `%${normalizedValue}%`) : null;
+  const productName = productNameExpr(ctx);
 
   const rawSql = `(
     c.name ILIKE ${raw}
@@ -188,7 +197,7 @@ function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
     OR c.trigger ILIKE ${raw}
     OR ${artistSearchSql(raw, ctx)}
     OR c.true_set_code ILIKE ${raw}
-    OR p.name ILIKE ${raw}
+    OR ${productName} ILIKE ${raw}
     OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE t ILIKE ${raw})
     OR EXISTS (SELECT 1 FROM unnest(COALESCE(c.attribute, ARRAY[]::text[])) AS a WHERE a ILIKE ${raw})
   )`;
@@ -202,7 +211,7 @@ function compileFreeText(value: string, negated: boolean, ctx: Ctx): string {
     OR ${normalizedTextSql("c.trigger")} LIKE ${normalized}
     OR ${normalizedArtistSearchSql(normalized, ctx)}
     OR ${normalizedTextSql("c.true_set_code")} LIKE ${normalized}
-    OR ${normalizedTextSql("p.name")} LIKE ${normalized}
+    OR ${normalizedTextSql(productName)} LIKE ${normalized}
     OR EXISTS (SELECT 1 FROM unnest(c.types) AS t WHERE ${normalizedTextSql("t")} LIKE ${normalized})
     OR EXISTS (SELECT 1 FROM unnest(COALESCE(c.attribute, ARRAY[]::text[])) AS a WHERE ${normalizedTextSql("a")} LIKE ${normalized})
   )`
@@ -547,7 +556,7 @@ function compileFilter(
     }
 
     case "year": {
-      return numericOp("EXTRACT(YEAR FROM p.released_at)", op, value, negated, ctx);
+      return numericOp(`EXTRACT(YEAR FROM ${productReleasedAtExpr(ctx)})`, op, value, negated, ctx);
     }
 
     case "date": {
@@ -573,7 +582,7 @@ function compileFilter(
         default:
           throw new Error(`Unsupported date operator: ${op}`);
       }
-      const sql = `p.released_at ${cmp} ${p}::date`;
+      const sql = `${productReleasedAtExpr(ctx)} ${cmp} ${p}::date`;
       return negated ? `NOT (${sql})` : sql;
     }
 

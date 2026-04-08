@@ -55,20 +55,30 @@ export async function randomRoute(app: FastifyInstance) {
 
     const where = conditions.join(" AND ");
 
+    const countResult = await query<{ total: string }>(
+      `SELECT COUNT(*) AS total
+       FROM cards c
+       WHERE ${where}`,
+      params,
+    );
+
+    const total = parseInt(countResult.rows[0]?.total ?? "0", 10);
+    if (total === 0) {
+      reply.code(404);
+      return { error: { status: 404, message: "No cards match filters" } };
+    }
+
+    const randomOffset = Math.floor(Math.random() * total);
     const row = await query<CardRow>(
       `SELECT c.*, p.name AS product_name, p.released_at
        FROM cards c
        LEFT JOIN products p ON p.id = c.product_id
        WHERE ${where}
-       ORDER BY RANDOM()
-       LIMIT 1`,
-      params,
+       ORDER BY c.id
+       LIMIT 1
+       OFFSET $${idx}`,
+      [...params, randomOffset],
     );
-
-    if (row.rows.length === 0) {
-      reply.code(404);
-      return { error: { status: 404, message: "No cards match filters" } };
-    }
 
     const card = row.rows[0];
     const variants = await query<VariantRow>(

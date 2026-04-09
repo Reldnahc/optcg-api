@@ -11,6 +11,18 @@ import {
 
 type BanType = "banned" | "restricted" | "pair";
 
+const STANDARD_ROTATION_BASE_BLOCK = 1;
+const STANDARD_ROTATION_BASE_YEAR = 2026;
+
+function deriveDefaultRotationDateForBlock(block: string): string | null {
+  const parsedBlock = Number.parseInt(block.trim(), 10);
+  if (!Number.isInteger(parsedBlock) || parsedBlock < STANDARD_ROTATION_BASE_BLOCK) {
+    return null;
+  }
+
+  return new Date(Date.UTC(STANDARD_ROTATION_BASE_YEAR + parsedBlock - 1, 3, 1)).toISOString();
+}
+
 interface FormatRow {
   id: string;
   name: string;
@@ -382,7 +394,10 @@ export async function adminFormatsRoutes(app: FastifyInstance) {
 
     let rotationState;
     try {
-      rotationState = resolveFormatBlockRotationInput(body);
+      rotationState = resolveFormatBlockRotationInput({
+        ...body,
+        rotated_at: body.rotated_at ?? (body.legal === false ? deriveDefaultRotationDateForBlock(body.block) : null),
+      });
     } catch (error: any) {
       reply.code(400);
       return { error: { status: 400, message: error.message } };

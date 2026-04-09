@@ -165,11 +165,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "I Do Not Forgive Those Who Laugh at My Family",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -218,11 +218,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "luffy leader",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -270,11 +270,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "sec luffy",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -319,11 +319,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "is:alternate",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -377,11 +377,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "t:char r:secret is:aa p>=7000",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -420,17 +420,22 @@ const tests = [
                   card_number: "OP13-001",
                   name: "Monkey D. Luffy",
                 }),
-                image_url: "https://example.com/sp.png",
-                scan_url: null,
-                scan_thumb_url: null,
-                tcgplayer_url: null,
-                market_price: null,
-                low_price: null,
-                mid_price: null,
-                high_price: null,
-                label: "SP",
-                variant_index: 1,
-                variant_product_name: "Special Set",
+                v_variant_index: 1,
+                v_label: "SP",
+                v_artist: null,
+                v_image_url: "https://example.com/sp.png",
+                v_image_thumb_url: null,
+                v_scan_display_url: null,
+                v_scan_full_url: null,
+                v_scan_thumb_url: null,
+                v_product_name: "Special Set",
+                v_product_set_code: null,
+                v_product_released_at: null,
+                v_tcgplayer_url: null,
+                v_market_price: null,
+                v_low_price: null,
+                v_mid_price: null,
+                v_high_price: null,
               },
             ],
           },
@@ -440,17 +445,17 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "is:sp",
             limit: "5",
-            unique: "prints",
+            collapse: "variant",
           },
         });
 
         assert.equal(response.statusCode, 200);
         const body = response.json();
-        assert.equal(body.data[0].label, "SP");
+        assert.equal(body.data[0].variants[0].label, "SP");
         assertDone();
       } finally {
         await app.close();
@@ -482,17 +487,22 @@ const tests = [
                   card_number: "OP13-001",
                   name: "Monkey D. Luffy",
                 }),
-                image_url: "https://example.com/standard.png",
-                scan_url: null,
-                scan_thumb_url: null,
-                tcgplayer_url: null,
-                market_price: null,
-                low_price: null,
-                mid_price: null,
-                high_price: null,
-                label: "Standard",
-                variant_index: 0,
-                variant_product_name: "Base Set",
+                v_variant_index: 0,
+                v_label: "Standard",
+                v_artist: null,
+                v_image_url: "https://example.com/standard.png",
+                v_image_thumb_url: null,
+                v_scan_display_url: null,
+                v_scan_full_url: null,
+                v_scan_thumb_url: null,
+                v_product_name: "Base Set",
+                v_product_set_code: null,
+                v_product_released_at: null,
+                v_tcgplayer_url: null,
+                v_market_price: null,
+                v_low_price: null,
+                v_mid_price: null,
+                v_high_price: null,
               },
               {
                 ...createCardRow({
@@ -500,17 +510,22 @@ const tests = [
                   card_number: "OP13-001",
                   name: "Monkey D. Luffy",
                 }),
-                image_url: "https://example.com/sp.png",
-                scan_url: null,
-                scan_thumb_url: null,
-                tcgplayer_url: null,
-                market_price: null,
-                low_price: null,
-                mid_price: null,
-                high_price: null,
-                label: "SP",
-                variant_index: 1,
-                variant_product_name: "Special Set",
+                v_variant_index: 1,
+                v_label: "SP",
+                v_artist: null,
+                v_image_url: "https://example.com/sp.png",
+                v_image_thumb_url: null,
+                v_scan_display_url: null,
+                v_scan_full_url: null,
+                v_scan_thumb_url: null,
+                v_product_name: "Special Set",
+                v_product_set_code: null,
+                v_product_released_at: null,
+                v_tcgplayer_url: null,
+                v_market_price: null,
+                v_low_price: null,
+                v_mid_price: null,
+                v_high_price: null,
               },
             ],
           },
@@ -520,18 +535,18 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "has:sp",
             limit: "5",
-            unique: "prints",
+            collapse: "variant",
           },
         });
 
         assert.equal(response.statusCode, 200);
         const body = response.json();
         assert.equal(body.data.length, 2);
-        assert.deepEqual(body.data.map((row) => row.label), ["Standard", "SP"]);
+        assert.deepEqual(body.data.map((row) => row.variants[0].label), ["Standard", "SP"]);
         assertDone();
       } finally {
         await app.close();
@@ -572,11 +587,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "luffy sp",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -713,17 +728,22 @@ const tests = [
             rows: [
               {
                 ...createCardRow({ id: "card-print-1", card_number: "PRB01-001", name: "Luffy" }),
-                image_url: "https://example.com/print.png",
-                scan_url: "https://example.com/print-scan.png",
-                scan_thumb_url: "https://example.com/print-scan-thumb.webp",
-                tcgplayer_url: "https://example.com/tcgplayer/1",
-                market_price: "12.34",
-                low_price: "10.00",
-                mid_price: "12.00",
-                high_price: "15.00",
-                label: "Standard",
-                variant_index: 0,
-                variant_product_name: "Anime 25th Collection",
+                v_variant_index: 0,
+                v_label: "Standard",
+                v_artist: null,
+                v_image_url: "https://example.com/print.png",
+                v_image_thumb_url: null,
+                v_scan_display_url: "https://example.com/print-scan.png",
+                v_scan_full_url: null,
+                v_scan_thumb_url: "https://example.com/print-scan-thumb.webp",
+                v_product_name: "Anime 25th Collection",
+                v_product_set_code: null,
+                v_product_released_at: null,
+                v_tcgplayer_url: "https://example.com/tcgplayer/1",
+                v_market_price: "12.34",
+                v_low_price: "10.00",
+                v_mid_price: "12.00",
+                v_high_price: "15.00",
               },
             ],
           },
@@ -733,11 +753,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: 'product="Anime 25th Collection"',
             limit: "5",
-            unique: "prints",
+            collapse: "variant",
             sort: "relevance",
           },
         });
@@ -745,7 +765,7 @@ const tests = [
         assert.equal(response.statusCode, 200);
         const body = response.json();
         assert.ok(body.data.length > 0);
-        assert.equal(body.data[0].variant_product_name, "Anime 25th Collection");
+        assert.equal(body.data[0].variants[0].product.name, "Anime 25th Collection");
         assert.deepEqual(body.meta, {
           sort_requested: "relevance",
           sort_applied: "card_number",
@@ -792,11 +812,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             color: "red,yellow",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -842,11 +862,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             color: "u,b",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -892,11 +912,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "c=yellow,red",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -939,11 +959,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "youre the one",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
           },
         });
 
@@ -992,11 +1012,11 @@ const tests = [
       try {
         const response = await app.inject({
           method: "GET",
-          url: "/v1/cards",
+          url: "/v1/search",
           query: {
             q: "youre the one",
             limit: "5",
-            unique: "cards",
+            collapse: "card",
             sort: "card_number",
           },
         });

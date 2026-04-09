@@ -34,10 +34,7 @@ import {
   CardVariant,
   VariantRow,
   buildVariant,
-  cardImageAssetPublicUrlSql,
-  publicScanUrlSql,
   setName,
-  variantDisplayOrderSql,
 } from "../format.js";
 
 type QueryExecutor = typeof query;
@@ -281,10 +278,51 @@ function buildCardDetailItem(
   };
 }
 
+function variantAssetJoinSql(cardImageAlias: string, assetAlias: string): string {
+  return `LEFT JOIN LATERAL (
+    SELECT
+      MAX(public_url) FILTER (WHERE role = 'image_url') AS image_url,
+      MAX(public_url) FILTER (WHERE role = 'image_thumb') AS image_thumb_url,
+      MAX(public_url) FILTER (WHERE role = 'scan_display') AS scan_display_url,
+      MAX(public_url) FILTER (WHERE role = 'scan_url') AS scan_full_url,
+      MAX(public_url) FILTER (WHERE role = 'scan_thumb') AS scan_thumb_url
+    FROM card_image_assets cia
+    WHERE cia.card_image_id = ${cardImageAlias}.id
+  ) ${assetAlias} ON true`;
+}
+
+function variantDisplayOrderResolvedSql(
+  imageUrlExpr: string,
+  cardImageAlias: string,
+  productAlias: string,
+): string {
+  return [
+    `CASE WHEN NULLIF(BTRIM(COALESCE(${imageUrlExpr}, '')), '') IS NULL THEN 1 ELSE 0 END`,
+    `CASE WHEN ${productAlias}.released_at IS NULL THEN 1 ELSE 0 END`,
+    `${productAlias}.released_at ASC`,
+    `CASE ${cardImageAlias}.label
+      WHEN 'Standard' THEN 0
+      WHEN 'Reprint' THEN 1
+      WHEN 'Jolly Roger Foil' THEN 2
+      WHEN 'Textured Foil' THEN 3
+      WHEN 'Full Art' THEN 4
+      WHEN 'Winner' THEN 5
+      WHEN 'Alternate Art' THEN 6
+      WHEN 'SP' THEN 7
+      WHEN 'TR' THEN 7
+      WHEN 'Manga Art' THEN 8
+      WHEN 'Promo' THEN 9
+      ELSE 99
+    END`,
+    `${cardImageAlias}.variant_index`,
+  ].join(", ");
+}
+
 /**
  * SQL select list for the per-variant query, in the column shape consumed
  * by `buildVariant` (matches `VariantRow` in format.ts). Aliases used:
  *   ci  = card_images, c = cards, ip = ci.product (variant product),
+ *   assets = per-variant asset urls (lateral join),
  *   latest_price = LATERAL price join (per variant)
  */
 const VARIANT_SELECT_SQL = `
@@ -294,11 +332,11 @@ const VARIANT_SELECT_SQL = `
   ci.name,
   ci.label,
   ci.artist,
-  ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
-  ${cardImageAssetPublicUrlSql("ci.id", "image_thumb", "ci.image_thumb_url")} AS image_thumb_url,
-  ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_display_url,
-  ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_full_url,
-  ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
+  COALESCE(assets.image_url, ci.image_url) AS image_url,
+  COALESCE(assets.image_thumb_url, ci.image_thumb_url) AS image_thumb_url,
+  COALESCE(assets.scan_display_url, assets.scan_full_url, ci.scan_url) AS scan_display_url,
+  COALESCE(assets.scan_full_url, ci.scan_url) AS scan_full_url,
+  COALESCE(assets.scan_thumb_url, ci.scan_thumb_url) AS scan_thumb_url,
   ip.name AS product_name,
   ip.product_set_code AS product_set_code,
   ip.released_at AS product_released_at,
@@ -544,6 +582,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
          SELECT tp.tcgplayer_url, pr.market_price, pr.low_price, pr.mid_price, pr.high_price
          FROM card_images ci2
          LEFT JOIN products ip2 ON ip2.id = ci2.product_id
+         ${variantAssetJoinSql("ci2", "assets2")}
          LEFT JOIN LATERAL (
            SELECT tp2.tcgplayer_product_id, tp2.tcgplayer_url, tp2.sub_type
            FROM tcgplayer_products tp2
@@ -559,7 +598,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
            ORDER BY fetched_at DESC LIMIT 1
          ) pr ON true
          WHERE ci2.card_id = c.id AND ci2.classified = true
-         ORDER BY ${variantDisplayOrderSql("ci2", "ip2")}
+         ORDER BY ${variantDisplayOrderResolvedSql("COALESCE(assets2.image_url, ci2.image_url)", "ci2", "ip2")}
          LIMIT 1
        ) latest_price ON true`;
 
@@ -615,11 +654,11 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
                   ci.name AS v_name,
                   ci.label AS v_label,
                   ci.artist AS v_artist,
-                  ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS v_image_url,
-                  ${cardImageAssetPublicUrlSql("ci.id", "image_thumb", "ci.image_thumb_url")} AS v_image_thumb_url,
-                  ${publicScanUrlSql("ci.id", "ci.scan_url")} AS v_scan_display_url,
-                  ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS v_scan_full_url,
-                  ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS v_scan_thumb_url,
+                  COALESCE(assets.image_url, ci.image_url) AS v_image_url,
+                  COALESCE(assets.image_thumb_url, ci.image_thumb_url) AS v_image_thumb_url,
+                  COALESCE(assets.scan_display_url, assets.scan_full_url, ci.scan_url) AS v_scan_display_url,
+                  COALESCE(assets.scan_full_url, ci.scan_url) AS v_scan_full_url,
+                  COALESCE(assets.scan_thumb_url, ci.scan_thumb_url) AS v_scan_thumb_url,
                   ip.name AS v_product_name,
                   ip.product_set_code AS v_product_set_code,
                   ip.released_at AS v_product_released_at,
@@ -632,6 +671,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
            LEFT JOIN products p ON p.id = c.product_id
            JOIN card_images ci ON ci.card_id = c.id AND ci.classified = true
            LEFT JOIN products ip ON ip.id = ci.product_id
+           ${variantAssetJoinSql("ci", "assets")}
            ${variantPriceJoin}
            WHERE ${where}
            ORDER BY ${primaryOrderSql}, c.card_number ASC, ci.variant_index ASC
@@ -729,9 +769,10 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
          FROM card_images ci
          JOIN cards c ON c.id = ci.card_id
          LEFT JOIN products ip ON ip.id = ci.product_id
+         ${variantAssetJoinSql("ci", "assets")}
          ${variantPriceJoin}
          WHERE ${variantWhere}
-         ORDER BY ci.card_id, ${variantDisplayOrderSql("ci", "ip")}`,
+         ORDER BY ci.card_id, ${variantDisplayOrderResolvedSql("COALESCE(assets.image_url, ci.image_url)", "ci", "ip")}`,
         variantParams,
       );
       variantsByCardId = groupVariantsByCardId(variantResult.rows);
@@ -849,6 +890,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
          FROM card_images ci
          JOIN cards c ON c.id = ci.card_id
          LEFT JOIN products ip ON ip.id = ci.product_id
+         ${variantAssetJoinSql("ci", "assets")}
          LEFT JOIN LATERAL (
            SELECT tp.tcgplayer_url, pr.market_price, pr.low_price, pr.mid_price, pr.high_price
            FROM tcgplayer_products tp
@@ -864,7 +906,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
            LIMIT 1
          ) latest_price ON true
          WHERE ci.card_id = ANY($1::uuid[]) AND ci.classified = true
-         ORDER BY c.card_number, ${variantDisplayOrderSql("ci", "ip")}`,
+         ORDER BY c.card_number, ${variantDisplayOrderResolvedSql("COALESCE(assets.image_url, ci.image_url)", "ci", "ip")}`,
         [cardIds],
       ),
       distinctBlocks.length > 0
@@ -998,6 +1040,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
          FROM card_images ci
          JOIN cards c ON c.id = ci.card_id
          LEFT JOIN products ip ON ip.id = ci.product_id
+         ${variantAssetJoinSql("ci", "assets")}
          LEFT JOIN LATERAL (
            SELECT tp.tcgplayer_url, pr.market_price, pr.low_price, pr.mid_price, pr.high_price
            FROM tcgplayer_products tp
@@ -1013,7 +1056,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
            LIMIT 1
          ) latest_price ON true
          WHERE ci.card_id = $1 AND ci.classified = true
-         ORDER BY ${variantDisplayOrderSql("ci", "ip")}`,
+         ORDER BY ${variantDisplayOrderResolvedSql("COALESCE(assets.image_url, ci.image_url)", "ci", "ip")}`,
         [card.id],
       ),
       runQuery<FormatLegalityRow>(

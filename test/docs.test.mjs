@@ -28,11 +28,11 @@ try {
   const spec = openApiResponse.json();
   assert.equal(spec.openapi, "3.1.0");
   assert.ok(spec.paths["/health"]);
-  assert.ok(spec.paths["/v1/cards"]);
+  assert.ok(spec.paths["/v1/search"]);
   assert.ok(spec.paths["/v1/cards/autocomplete"]);
   assert.ok(spec.paths["/v1/cards/{card_number}"]);
-  assert.match(JSON.stringify(spec.paths["/v1/cards"]), /sort_applied/);
-  assert.match(JSON.stringify(spec.paths["/v1/cards"]), /relevance_active/);
+  assert.match(JSON.stringify(spec.paths["/v1/search"]), /sort_applied/);
+  assert.match(JSON.stringify(spec.paths["/v1/search"]), /relevance_active/);
   assert.ok(spec.paths["/v1/don"]);
   assert.ok(spec.paths["/v1/don/{id}"]);
   assert.ok(spec.paths["/v1/formats"]);

@@ -8,6 +8,7 @@ import {
   okEnvelopeSchema,
   paginatedEnvelopeSchema,
   paginationSchema,
+  productIdParamSchema,
   setCodeParamSchema,
 } from "./common.js";
 
@@ -82,38 +83,6 @@ const setProductSchema = {
     name: { type: "string" },
     set_codes: nullable({ type: "array", items: { type: "string" } }),
     released_at: nullable({ type: "string", format: "date-time" }),
-  },
-};
-
-const setCardSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["card_number", "name", "card_type", "rarity", "color", "cost", "power", "image_url", "thumbnail_url"],
-  properties: {
-    card_number: { type: "string" },
-    name: { type: "string" },
-    card_type: { type: "string" },
-    rarity: nullable({ type: "string" }),
-    color: { type: "array", items: { type: "string" } },
-    cost: nullable({ type: "integer" }),
-    power: nullable({ type: "integer" }),
-    image_url: nullable({ type: "string" }),
-    image_thumb_url: nullable({ type: "string" }),
-    thumbnail_url: nullable({ type: "string" }),
-  },
-};
-
-const setDetailSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["code", "name", "released_at", "card_count", "products", "cards"],
-  properties: {
-    code: { type: "string" },
-    name: { type: "string" },
-    released_at: nullable({ type: "string", format: "date-time" }),
-    card_count: { type: "integer" },
-    products: { type: "array", items: setProductSchema },
-    cards: { type: "array", items: setCardSchema },
   },
 };
 
@@ -328,6 +297,14 @@ const setSortEnum = [
   "set_code",
 ];
 
+const productSortEnum = [
+  "name",
+  "variant_count",
+  "card_count",
+  "released",
+  "product_set_code",
+];
+
 const cardSearchMetaSchema = {
   type: "object",
   additionalProperties: false,
@@ -449,8 +426,9 @@ const cardVariantSchema = {
     product: {
       type: "object",
       additionalProperties: false,
-      required: ["name", "set_code", "released_at"],
+      required: ["id", "name", "set_code", "released_at"],
       properties: {
+        id: nullable({ type: "string" }),
         name: nullable({ type: "string" }),
         set_code: nullable({ type: "string" }),
         released_at: nullable({ type: "string", format: "date-time" }),
@@ -475,6 +453,73 @@ const cardItemSchema = {
     variants: {
       type: "array",
       items: cardVariantSchema,
+    },
+  },
+};
+
+const productSummarySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name", "product_set_code", "set_codes", "released_at", "variant_count", "card_count"],
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    product_set_code: nullable({ type: "string" }),
+    set_codes: nullable({ type: "array", items: { type: "string" } }),
+    released_at: nullable({ type: "string", format: "date-time" }),
+    variant_count: { type: "integer" },
+    card_count: { type: "integer" },
+  },
+};
+
+const setCardSchema = {
+  ...cardItemSchema,
+};
+
+const setDetailSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code", "name", "released_at", "card_count", "products", "cards"],
+  properties: {
+    code: { type: "string" },
+    name: { type: "string" },
+    released_at: nullable({ type: "string", format: "date-time" }),
+    card_count: { type: "integer" },
+    products: { type: "array", items: setProductSchema },
+    cards: { type: "array", items: setCardSchema },
+  },
+};
+
+const productVariantCardSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [...cardBodyRequired, "variants"],
+  properties: {
+    ...cardBodyProperties,
+    variants: {
+      type: "array",
+      minItems: 1,
+      maxItems: 1,
+      items: cardVariantSchema,
+    },
+  },
+};
+
+const productDetailSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name", "product_set_code", "set_codes", "released_at", "variant_count", "card_count", "cards"],
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    product_set_code: nullable({ type: "string" }),
+    set_codes: nullable({ type: "array", items: { type: "string" } }),
+    released_at: nullable({ type: "string", format: "date-time" }),
+    variant_count: { type: "integer" },
+    card_count: { type: "integer" },
+    cards: {
+      type: "array",
+      items: productVariantCardSchema,
     },
   },
 };
@@ -600,6 +645,33 @@ export const setDetailRouteSchema = {
   params: setCodeParamSchema,
   response: {
     200: okEnvelopeSchema(setDetailSchema),
+    404: errorEnvelopeSchema,
+  },
+};
+
+export const productsListRouteSchema = {
+  tags: ["Products"],
+  summary: "List products",
+  querystring: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      sort: { type: "string", enum: productSortEnum },
+      order: { type: "string", enum: ["asc", "desc"] },
+    },
+  },
+  response: {
+    200: okEnvelopeSchema({ type: "array", items: productSummarySchema }),
+    400: errorEnvelopeSchema,
+  },
+};
+
+export const productDetailRouteSchema = {
+  tags: ["Products"],
+  summary: "Get product detail",
+  params: productIdParamSchema,
+  response: {
+    200: okEnvelopeSchema(productDetailSchema),
     404: errorEnvelopeSchema,
   },
 };
@@ -793,7 +865,7 @@ const prerenderManifestRouteEntrySchema = {
     route: { type: "string" },
     render_group: {
       type: "string",
-      enum: ["cards", "sets_index", "set_detail", "formats_index", "format_detail", "don", "scan_progress"],
+      enum: ["cards", "sets_index", "set_detail", "products_index", "product_detail", "formats_index", "format_detail", "don", "scan_progress"],
     },
     data_hash: { type: "string" },
   },

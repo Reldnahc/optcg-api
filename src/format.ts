@@ -135,6 +135,7 @@ export interface VariantRow {
   scan_display_url: string | null;
   scan_full_url: string | null;
   scan_thumb_url: string | null;
+  product_id?: string | null;
   product_name: string | null;
   product_set_code: string | null;
   product_released_at: string | null;
@@ -152,6 +153,7 @@ export interface CardVariant {
   label: string | null;
   artist: string | null;
   product: {
+    id: string | null;
     name: string | null;
     set_code: string | null;
     released_at: string | null;
@@ -197,6 +199,7 @@ export function buildVariant(row: VariantRow): CardVariant {
     label: row.label,
     artist: row.artist,
     product: {
+      id: row.product_id ?? null,
       name: row.product_name,
       set_code: row.product_set_code,
       released_at: row.product_released_at,

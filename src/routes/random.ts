@@ -82,7 +82,7 @@ export async function randomRoute(app: FastifyInstance) {
 
     const card = row.rows[0];
     const variants = await query<VariantRow>(
-      `SELECT ci.variant_index, ci.name, ci.label, ci.artist,
+      `SELECT ci.variant_index, ci.name, ci.label, ci.artist, ci.product_id::text AS product_id,
               ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
               ${cardImageAssetPublicUrlSql("ci.id", "image_thumb", "ci.image_thumb_url")} AS image_thumb_url,
               ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_display_url,

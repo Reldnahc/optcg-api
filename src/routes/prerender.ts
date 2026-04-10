@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { cardImageAssetPublicUrlSql, compareVariantDisplayOrder, publicScanUrlSql, thumbnailUrl, setName } from "../format.js";
+import { cardImageAssetPublicUrlSql, compareVariantDisplayOrder, publicScanUrlSql, thumbnailUrl, setName, variantDisplayOrderSql } from "../format.js";
 import { formatBlockAllowedSql, formatCardBlockLegalSql } from "../formatLegality.js";
 import { prerenderManifestRouteSchema } from "../schemas/public.js";
 
@@ -9,6 +9,8 @@ type RenderGroup =
   | "cards"
   | "sets_index"
   | "set_detail"
+  | "products_index"
+  | "product_detail"
   | "formats_index"
   | "format_detail"
   | "don"
@@ -114,6 +116,33 @@ interface SetProductRow {
   set_codes: string[] | null;
   released_at: string | null;
   code_count: number | null;
+}
+
+interface ProductSummaryRow {
+  id: string;
+  name: string;
+  product_set_code: string | null;
+  set_codes: string[] | null;
+  released_at: string | null;
+  variant_count: number;
+  card_count: number;
+}
+
+interface ProductCardRow {
+  product_id: string;
+  card_number: string;
+  name: string;
+  card_type: string;
+  rarity: string | null;
+  color: string[];
+  cost: number | null;
+  power: number | null;
+  variant_index: number;
+  label: string | null;
+  image_url: string | null;
+  image_thumb_url: string | null;
+  scan_display_url: string | null;
+  scan_thumb_url: string | null;
 }
 
 interface FormatSummaryRow {
@@ -341,6 +370,8 @@ export async function prerenderRoutes(app: FastifyInstance) {
       setsSummaryResult,
       setCardsResult,
       setProductsResult,
+      productsSummaryResult,
+      productCardsResult,
       formatsSummaryResult,
       formatBlocksResult,
       formatBansResult,
@@ -485,6 +516,41 @@ export async function prerenderRoutes(app: FastifyInstance) {
          JOIN LATERAL unnest(p.set_codes) WITH ORDINALITY AS set_codes(set_code, position) ON true
          WHERE p.language = 'en'
          ORDER BY set_codes.set_code ASC, code_count ASC, p.released_at ASC NULLS LAST, p.name ASC`,
+      ),
+      query<ProductSummaryRow>(
+        `SELECT p.id,
+                p.name,
+                p.product_set_code,
+                p.set_codes,
+                p.released_at,
+                COUNT(DISTINCT ci.id) FILTER (WHERE ci.classified = true)::int AS variant_count,
+                COUNT(DISTINCT ci.card_id) FILTER (WHERE ci.classified = true)::int AS card_count
+         FROM products p
+         LEFT JOIN card_images ci ON ci.product_id = p.id
+         WHERE p.language = 'en'
+         GROUP BY p.id
+         ORDER BY p.id ASC`,
+      ),
+      query<ProductCardRow>(
+        `SELECT ci.product_id::text AS product_id,
+                c.card_number,
+                c.name,
+                c.card_type,
+                c.rarity,
+                c.color,
+                c.cost,
+                c.power,
+                ci.variant_index,
+                ci.label,
+                ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "image_thumb", "ci.image_thumb_url")} AS image_thumb_url,
+                ${publicScanUrlSql("ci.id", "ci.scan_url")} AS scan_display_url,
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url
+         FROM card_images ci
+         JOIN cards c ON c.id = ci.card_id AND c.language = 'en'
+         LEFT JOIN products ip ON ip.id = ci.product_id
+         WHERE ci.classified = true
+         ORDER BY ci.product_id ASC, c.card_number ASC, ${variantDisplayOrderSql("ci", "ip")}`,
       ),
       query<FormatSummaryRow>(
         `SELECT f.id, f.name, f.description, f.has_rotation,
@@ -720,6 +786,66 @@ export async function prerenderRoutes(app: FastifyInstance) {
       routes.push({
         route: `/sets/${encodeURIComponent(code)}`,
         render_group: "set_detail",
+        data_hash: hashJson(payload),
+      });
+    }
+
+    const productSummaryPayload = productsSummaryResult.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      product_set_code: row.product_set_code,
+      set_codes: row.set_codes,
+      released_at: row.released_at,
+      variant_count: row.variant_count,
+      card_count: row.card_count,
+    }));
+
+    routes.push({
+      route: "/products",
+      render_group: "products_index",
+      data_hash: hashJson(productSummaryPayload),
+    });
+
+    const cardsByProduct = groupBy(productCardsResult.rows, (row) => row.product_id);
+
+    for (const product of productsSummaryResult.rows) {
+      const payload = {
+        id: product.id,
+        name: product.name,
+        product_set_code: product.product_set_code,
+        set_codes: product.set_codes,
+        released_at: product.released_at,
+        variant_count: product.variant_count,
+        card_count: product.card_count,
+        cards: (cardsByProduct.get(product.id) ?? []).map((card) => ({
+          card_number: card.card_number,
+          name: card.name,
+          card_type: card.card_type,
+          rarity: card.rarity,
+          color: card.color,
+          cost: card.cost,
+          power: card.power,
+          variants: [{
+            index: card.variant_index,
+            label: card.label,
+            images: {
+              stock: {
+                full: card.image_url,
+                thumb: card.image_thumb_url ?? thumbnailUrl(card.image_url),
+              },
+              scan: {
+                display: card.scan_display_url,
+                full: card.scan_display_url,
+                thumb: card.scan_thumb_url,
+              },
+            },
+          }],
+        })),
+      };
+
+      routes.push({
+        route: `/products/${encodeURIComponent(product.id)}`,
+        render_group: "product_detail",
         data_hash: hashJson(payload),
       });
     }

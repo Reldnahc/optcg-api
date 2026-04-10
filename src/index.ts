@@ -4,6 +4,7 @@ import { closePool } from "optcg-db/db/client.js";
 import { installOpenApi } from "./apiDocs.js";
 import { healthRoute } from "./routes/health.js";
 import { cardsRoutes } from "./routes/cards.js";
+import { productsRoutes } from "./routes/products.js";
 import { setsRoutes } from "./routes/sets.js";
 import { randomRoute } from "./routes/random.js";
 import { formatsRoutes } from "./routes/formats.js";
@@ -106,6 +107,7 @@ app.addHook("onSend", async (req, reply) => {
 app.register(healthRoute);
 app.register(docsRoutes);
 app.register(cardsRoutes, { prefix: "/v1" });
+app.register(productsRoutes, { prefix: "/v1" });
 app.register(setsRoutes, { prefix: "/v1" });
 app.register(randomRoute, { prefix: "/v1" });
 app.register(formatsRoutes, { prefix: "/v1" });

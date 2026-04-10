@@ -349,6 +349,7 @@ const VARIANT_SELECT_SQL = `
   ci.name,
   ci.label,
   ci.artist,
+  ci.product_id::text AS product_id,
   COALESCE(assets.image_url, ci.image_url) AS image_url,
   COALESCE(assets.image_thumb_url, ci.image_thumb_url) AS image_thumb_url,
   COALESCE(assets.scan_display_url, assets.scan_full_url, ci.scan_url) AS scan_display_url,

@@ -75,6 +75,15 @@ export const setCodeParamSchema = {
   },
 };
 
+export const productIdParamSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["product_id"],
+  properties: {
+    product_id: { type: "string" },
+  },
+};
+
 export const formatNameParamSchema = {
   type: "object",
   additionalProperties: false,

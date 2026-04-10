@@ -1,6 +1,14 @@
 import { FastifyInstance } from "fastify";
 import { query } from "optcg-db/db/client.js";
-import { bestImageSubquery, setName, thumbnailUrl } from "../format.js";
+import {
+  buildVariant,
+  cardImageAssetPublicUrlSql,
+  CardRow,
+  formatCard,
+  setName,
+  VariantRow,
+  variantDisplayOrderSql,
+} from "../format.js";
 import { setDetailRouteSchema, setsListRouteSchema } from "../schemas/public.js";
 
 type QueryExecutor = typeof query;
@@ -84,20 +92,29 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
     const { set_code } = req.params as { set_code: string };
     const code = set_code.toUpperCase();
 
-    const cards = await runQuery<{
-      card_number: string;
-      name: string;
-      card_type: string;
-      rarity: string | null;
-      color: string[];
-      cost: number | null;
-      power: number | null;
-      image_url: string | null;
-    }>(
-      `SELECT c.card_number, c.name, c.card_type, c.rarity, c.color,
-              c.cost, c.power,
-              ${bestImageSubquery("c.id")} AS image_url
+    const cards = await runQuery<CardRow>(
+      `SELECT c.id,
+              c.card_number,
+              c.language,
+              c.product_id,
+              c.true_set_code,
+              c.name,
+              c.card_type,
+              c.rarity,
+              c.color,
+              c.cost,
+              c.power,
+              c.counter,
+              c.life,
+              c.attribute,
+              c.types,
+              c.effect,
+              c.trigger,
+              c.block,
+              p.name AS product_name,
+              p.released_at
        FROM cards c
+       LEFT JOIN products p ON p.id = c.product_id
        WHERE c.true_set_code = $1 AND c.language = 'en'
        ORDER BY c.card_number`,
       [code],
@@ -106,6 +123,46 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
     if (cards.rows.length === 0) {
       reply.code(404);
       return { error: { status: 404, message: "Set not found" } };
+    }
+
+    const variants = await runQuery<VariantRow & { card_id: string }>(
+      `SELECT ci.card_id,
+              ci.product_id::text AS product_id,
+              ci.variant_index,
+              ci.name,
+              ci.label,
+              ci.artist,
+              ${cardImageAssetPublicUrlSql("ci.id", "image_url", "ci.image_url")} AS image_url,
+              ${cardImageAssetPublicUrlSql("ci.id", "image_thumb", "ci.image_thumb_url")} AS image_thumb_url,
+              COALESCE(
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_display", "NULL")},
+                ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")}
+              ) AS scan_display_url,
+              ${cardImageAssetPublicUrlSql("ci.id", "scan_url", "ci.scan_url")} AS scan_full_url,
+              ${cardImageAssetPublicUrlSql("ci.id", "scan_thumb", "ci.scan_thumb_url")} AS scan_thumb_url,
+              ip.name AS product_name,
+              ip.product_set_code AS product_set_code,
+              ip.released_at AS product_released_at,
+              NULL::text AS tcgplayer_url,
+              NULL::text AS market_price,
+              NULL::text AS low_price,
+              NULL::text AS mid_price,
+              NULL::text AS high_price
+       FROM card_images ci
+       JOIN cards c ON c.id = ci.card_id
+       LEFT JOIN products ip ON ip.id = ci.product_id
+       WHERE c.true_set_code = $1
+         AND c.language = 'en'
+         AND ci.classified = true
+       ORDER BY c.card_number, ${variantDisplayOrderSql("ci", "ip")}`,
+      [code],
+    );
+
+    const variantsByCardId = new Map<string, VariantRow[]>();
+    for (const row of variants.rows) {
+      const list = variantsByCardId.get(row.card_id) ?? [];
+      list.push(row);
+      variantsByCardId.set(row.card_id, list);
     }
 
     const setProducts = await runQuery<{
@@ -139,8 +196,8 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
           released_at: p.released_at,
         })),
         cards: cards.rows.map((card) => ({
-          ...card,
-          thumbnail_url: thumbnailUrl(card.image_url),
+          ...formatCard(card),
+          variants: (variantsByCardId.get(card.id) ?? []).map(buildVariant),
         })),
       },
     };

@@ -187,11 +187,12 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
     }
 
     const setProducts = await runQuery<{
+      id: string;
       name: string;
       set_codes: string[] | null;
       released_at: string | null;
     }>(
-      `SELECT DISTINCT p.name, p.set_codes, p.released_at, array_length(p.set_codes, 1) AS code_count
+      `SELECT DISTINCT p.id, p.name, p.set_codes, p.released_at, array_length(p.set_codes, 1) AS code_count
        FROM products p
        WHERE p.set_codes @> ARRAY[$1]::text[] AND p.language = 'en'
        ORDER BY code_count ASC, p.released_at ASC NULLS LAST, p.name`,
@@ -212,6 +213,7 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
         released_at: releasedAt,
         card_count: cards.rows.length,
         products: setProducts.rows.map((p) => ({
+          id: p.id,
           name: p.name,
           set_codes: p.set_codes,
           released_at: p.released_at,

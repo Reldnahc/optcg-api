@@ -78,8 +78,9 @@ const setSummarySchema = {
 const setProductSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "set_codes", "released_at"],
+  required: ["id", "name", "set_codes", "released_at"],
   properties: {
+    id: { type: "string" },
     name: { type: "string" },
     set_codes: nullable({ type: "array", items: { type: "string" } }),
     released_at: nullable({ type: "string", format: "date-time" }),

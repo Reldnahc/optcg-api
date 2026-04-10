@@ -24,6 +24,13 @@ const VALID_SET_SORTS: Record<string, string> = {
   set_code: "true_set_code",
 };
 
+function tcgplayerProductOrderSql(alias: string): string {
+  return `CASE
+    WHEN NULLIF(${alias}.sub_type, '') IS NULL OR ${alias}.sub_type = 'Normal' THEN 0
+    ELSE 1
+  END, ${alias}.tcgplayer_product_id`;
+}
+
 function defaultOrderForSetSort(sort: string): "asc" | "desc" {
   return sort === "released" || sort === "card_count" ? "desc" : "asc";
 }
@@ -143,14 +150,28 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
               ip.name AS product_name,
               ip.product_set_code AS product_set_code,
               ip.released_at AS product_released_at,
-              NULL::text AS tcgplayer_url,
-              NULL::text AS market_price,
-              NULL::text AS low_price,
-              NULL::text AS mid_price,
-              NULL::text AS high_price
+              latest_price.tcgplayer_url AS tcgplayer_url,
+              latest_price.market_price,
+              latest_price.low_price,
+              latest_price.mid_price,
+              latest_price.high_price
        FROM card_images ci
        JOIN cards c ON c.id = ci.card_id
        LEFT JOIN products ip ON ip.id = ci.product_id
+       LEFT JOIN LATERAL (
+         SELECT tp.tcgplayer_url, pr.market_price, pr.low_price, pr.mid_price, pr.high_price
+         FROM tcgplayer_products tp
+         LEFT JOIN LATERAL (
+           SELECT market_price, low_price, mid_price, high_price
+           FROM tcgplayer_prices
+           WHERE tcgplayer_product_id = tp.tcgplayer_product_id
+             AND sub_type IS NOT DISTINCT FROM tp.sub_type
+           ORDER BY fetched_at DESC LIMIT 1
+         ) pr ON true
+         WHERE tp.card_image_id = ci.id
+         ORDER BY ${tcgplayerProductOrderSql("tp")}
+         LIMIT 1
+       ) latest_price ON true
        WHERE c.true_set_code = $1
          AND c.language = 'en'
          AND ci.classified = true

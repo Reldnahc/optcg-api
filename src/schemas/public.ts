@@ -495,6 +495,17 @@ const cardLegalitySchema = {
   },
 };
 
+const officialFaqEntrySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["question", "answer", "updated_on"],
+  properties: {
+    question: { type: "string" },
+    answer: { type: "string" },
+    updated_on: { type: "string", format: "date" },
+  },
+};
+
 /**
  * Card item plus legality + available_languages. Used by the detail and
  * batch endpoints where per-card format legality is relevant.
@@ -502,7 +513,7 @@ const cardLegalitySchema = {
 const cardDetailItemSchema = {
   type: "object",
   additionalProperties: false,
-  required: [...cardBodyRequired, "variants", "legality", "available_languages"],
+  required: [...cardBodyRequired, "variants", "legality", "available_languages", "official_faq"],
   properties: {
     ...cardBodyProperties,
     variants: {
@@ -516,6 +527,10 @@ const cardDetailItemSchema = {
     available_languages: {
       type: "array",
       items: { type: "string" },
+    },
+    official_faq: {
+      type: "array",
+      items: officialFaqEntrySchema,
     },
   },
 };

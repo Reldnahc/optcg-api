@@ -101,6 +101,23 @@ const { app, assertDone } = await withCardsApp([
       rows: [{ card_number: "OP05-091", language: "en" }, { card_number: "OP05-091", language: "ja" }],
     },
   },
+  {
+    match: "FROM bandai_faq_entries e",
+    result: {
+      rows: [
+        {
+          card_number: "OP05-091",
+          card_name: "Rebecca",
+          question: "Can I do the thing?",
+          answer: "Yes, you can.",
+          source_key: "qa_op05",
+          source_title: "BOOSTER PACK -AWAKENING OF THE NEW ERA- [OP-05]",
+          source_url: "https://en.onepiece-cardgame.com/pdf/qa_op05.pdf",
+          source_updated_on: "2025-01-10",
+        },
+      ],
+    },
+  },
 ]);
 
 try {
@@ -115,7 +132,10 @@ try {
   assert.ok(!("images" in detailBody.data));
   assert.ok(Array.isArray(detailBody.data.variants));
   assert.ok(Array.isArray(detailBody.data.available_languages));
+  assert.ok(Array.isArray(detailBody.data.official_faq));
   assert.ok(typeof detailBody.data.legality === "object");
+  assert.equal(detailBody.data.official_faq[0].question, "Can I do the thing?");
+  assert.equal(detailBody.data.official_faq[0].updated_on, "2025-01-10");
 
   // DB returns variant_index=1 first (has image), variant_index=0 second
   // (no image). buildVariant should preserve the order as the SQL returned

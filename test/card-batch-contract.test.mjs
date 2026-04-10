@@ -128,6 +128,26 @@ const { app, assertDone } = await withCardsApp([
       ],
     },
   },
+  {
+    match: "FROM bandai_faq_entries e",
+    assert: ({ params }) => {
+      assert.deepEqual(params, [["OP01-001", "OP02-033"], "en"]);
+    },
+    result: {
+      rows: [
+        {
+          card_number: "OP01-001",
+          card_name: "Leader Luffy",
+          question: "Can I activate this twice?",
+          answer: "No, you cannot.",
+          source_key: "qa_op01",
+          source_title: "BOOSTER PACK -ROMANCE DAWN- [OP-01]",
+          source_url: "https://en.onepiece-cardgame.com/pdf/qa_op01.pdf",
+          source_updated_on: "2025-01-01",
+        },
+      ],
+    },
+  },
 ]);
 
 try {
@@ -156,6 +176,9 @@ try {
   assert.equal(body.data["OP01-001"].legality.Standard.status, "restricted");
   assert.equal(body.data["OP01-001"].legality.Standard.max_copies, 1);
   assert.deepEqual(body.data["OP01-001"].available_languages, ["en", "ja"]);
+  assert.equal(body.data["OP01-001"].official_faq.length, 1);
+  assert.equal(body.data["OP01-001"].official_faq[0].question, "Can I activate this twice?");
+  assert.equal(body.data["OP01-001"].official_faq[0].updated_on, "2025-01-01");
 
   // OP02-033 has a Manga Art variant — mangaExempt flags the card legal
   // even though its block is not legal in the format.
@@ -164,6 +187,7 @@ try {
   assert.equal(body.data["OP02-033"].variants[0].label, "Manga Art");
   assert.equal(body.data["OP02-033"].legality.Standard.status, "legal");
   assert.deepEqual(body.data["OP02-033"].available_languages, ["en"]);
+  assert.deepEqual(body.data["OP02-033"].official_faq, []);
 
   assertDone();
   console.log("PASS card batch returns keyed card details and missing card numbers");

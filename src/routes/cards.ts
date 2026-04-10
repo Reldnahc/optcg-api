@@ -166,6 +166,17 @@ type CardLanguageRow = {
   language: string;
 };
 
+type BandaiFaqRow = {
+  card_number: string;
+  card_name: string;
+  question: string;
+  answer: string;
+  source_key: string;
+  source_title: string;
+  source_url: string;
+  source_updated_on: string;
+};
+
 function normalizeRequestedCardNumbers(cardNumbers: unknown): string[] {
   if (!Array.isArray(cardNumbers)) return [];
   return [...new Set(cardNumbers
@@ -268,6 +279,7 @@ function buildCardDetailItem(
   legalityRows: FormatLegalityRow[],
   cardBanRows: CardBanRow[],
   languageRows: CardLanguageRow[],
+  faqRows: BandaiFaqRow[],
 ) {
   return {
     ...formatCard(card),
@@ -275,6 +287,11 @@ function buildCardDetailItem(
     variants: variantRows.map(buildVariant),
     legality: buildLegality(card, legalityRows, cardBanRows, hasMangaVariant(variantRows)),
     available_languages: languageRows.map((row) => row.language),
+    official_faq: faqRows.map((row) => ({
+      question: row.question,
+      answer: row.answer,
+      updated_on: row.source_updated_on,
+    })),
   };
 }
 
@@ -884,7 +901,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
     const distinctBlocks = uniqueStrings(foundCards.map((card) => card.block).filter((block): block is string => Boolean(block)));
     const foundCardNumbers = foundCards.map((card) => card.card_number.toUpperCase());
 
-    const [images, legality, cardBans, languages] = await Promise.all([
+    const [images, legality, cardBans, languages, faq] = await Promise.all([
       runQuery<CardVariantRow>(
         `SELECT ${VARIANT_SELECT_SQL}
          FROM card_images ci
@@ -937,6 +954,15 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
          ORDER BY card_number, language`,
         [foundCardNumbers],
       ),
+      runQuery<BandaiFaqRow>(
+        `SELECT e.card_number, e.card_name, e.question, e.answer,
+                d.source_key, d.title AS source_title, d.pdf_url AS source_url, d.updated_on::text AS source_updated_on
+         FROM bandai_faq_entries e
+         JOIN bandai_faq_documents d ON d.id = e.document_id
+         WHERE UPPER(e.card_number) = ANY($1::text[]) AND d.language = $2
+         ORDER BY e.card_number, d.updated_on DESC, d.source_key, e.ordinal`,
+        [foundCardNumbers, lang],
+      ),
     ]);
 
     const variantsByCardNumber = groupVariantsByCardNumber(images.rows);
@@ -964,6 +990,14 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
       languagesByCardNumber.set(key, rows);
     }
 
+    const faqByCardNumber = new Map<string, BandaiFaqRow[]>();
+    for (const row of faq.rows) {
+      const key = row.card_number.toUpperCase();
+      const rows = faqByCardNumber.get(key) ?? [];
+      rows.push(row);
+      faqByCardNumber.set(key, rows);
+    }
+
     const data = Object.fromEntries(foundCards.map((card) => {
       const key = card.card_number.toUpperCase();
       return [
@@ -974,6 +1008,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
           legalityByBlock.get(card.block ?? "") ?? [],
           bansByCardNumber.get(key) ?? [],
           languagesByCardNumber.get(key) ?? [],
+          faqByCardNumber.get(key) ?? [],
         ),
       ];
     }));
@@ -1034,7 +1069,7 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
 
     const card = cardResult.rows[0];
 
-    const [images, legality, cardBans, languages] = await Promise.all([
+    const [images, legality, cardBans, languages, faq] = await Promise.all([
       runQuery<CardVariantRow>(
         `SELECT ${VARIANT_SELECT_SQL}
          FROM card_images ci
@@ -1078,11 +1113,20 @@ export async function cardsRoutes(app: FastifyInstance, options: CardsRoutesOpti
         `SELECT DISTINCT card_number, language FROM cards WHERE card_number ILIKE $1 ORDER BY language`,
         [card_number],
       ),
+      runQuery<BandaiFaqRow>(
+        `SELECT e.card_number, e.card_name, e.question, e.answer,
+                d.source_key, d.title AS source_title, d.pdf_url AS source_url, d.updated_on::text AS source_updated_on
+         FROM bandai_faq_entries e
+         JOIN bandai_faq_documents d ON d.id = e.document_id
+         WHERE UPPER(e.card_number) = UPPER($1) AND d.language = $2
+         ORDER BY d.updated_on DESC, d.source_key, e.ordinal`,
+        [card_number, lang],
+      ),
     ]);
 
     reply.header("Cache-Control", "public, max-age=86400");
     return {
-      data: buildCardDetailItem(card, images.rows, legality.rows, cardBans.rows, languages.rows),
+      data: buildCardDetailItem(card, images.rows, legality.rows, cardBans.rows, languages.rows, faq.rows),
     };
   });
 }

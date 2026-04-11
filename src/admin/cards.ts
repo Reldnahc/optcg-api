@@ -280,26 +280,52 @@ export async function adminCardsRoutes(app: FastifyInstance) {
 
     params.push(limit);
     const products = await query<AdminProductRow>(
-      `SELECT p.id,
-              p.language,
-              p.name,
-              p.source,
-              p.product_set_code,
-              p.set_codes,
-              p.released_at::text AS released_at,
-              COUNT(DISTINCT c.id) FILTER (WHERE c.product_id = p.id)::int AS primary_card_count,
-              COUNT(DISTINCT ci.id) FILTER (WHERE ci.product_id = p.id)::int AS variant_count,
-              COUNT(DISTINCT cs.card_id)::int AS card_source_count,
-              COUNT(DISTINCT d.id)::int AS don_count
-       FROM products p
-       LEFT JOIN cards c ON c.product_id = p.id
-       LEFT JOIN card_images ci ON ci.product_id = p.id
-       LEFT JOIN card_sources cs ON cs.product_id = p.id
-       LEFT JOIN don_cards d ON d.product_id = p.id
-       WHERE ${conditions.join(" AND ")}
-       GROUP BY p.id
-       ORDER BY p.released_at DESC NULLS LAST, p.name ASC, p.id ASC
-       LIMIT $${params.length}`,
+      `WITH filtered_products AS (
+         SELECT p.id,
+                p.language,
+                p.name,
+                p.source,
+                p.product_set_code,
+                p.set_codes,
+                p.released_at
+         FROM products p
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY p.released_at DESC NULLS LAST, p.name ASC, p.id ASC
+         LIMIT $${params.length}
+       )
+       SELECT fp.id,
+              fp.language,
+              fp.name,
+              fp.source,
+              fp.product_set_code,
+              fp.set_codes,
+              fp.released_at::text AS released_at,
+              COALESCE(card_counts.primary_card_count, 0)::int AS primary_card_count,
+              COALESCE(variant_counts.variant_count, 0)::int AS variant_count,
+              COALESCE(card_source_counts.card_source_count, 0)::int AS card_source_count,
+              COALESCE(don_counts.don_count, 0)::int AS don_count
+       FROM filtered_products fp
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS primary_card_count
+         FROM cards c
+         WHERE c.product_id = fp.id
+       ) AS card_counts ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS variant_count
+         FROM card_images ci
+         WHERE ci.product_id = fp.id
+       ) AS variant_counts ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(DISTINCT cs.card_id)::int AS card_source_count
+         FROM card_sources cs
+         WHERE cs.product_id = fp.id
+       ) AS card_source_counts ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS don_count
+         FROM don_cards d
+         WHERE d.product_id = fp.id
+       ) AS don_counts ON true
+       ORDER BY fp.released_at DESC NULLS LAST, fp.name ASC, fp.id ASC`,
       params,
     );
 

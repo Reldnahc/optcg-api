@@ -904,6 +904,8 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     return {
       data: {
         ...formatCard(card),
+        product_id: card.product_id ?? null,
+        product_name: card.product_name ?? null,
         set_name: card.set_product_name ?? setName(card.true_set_code),
         images: [...imageMap.values()]
           .sort((a, b) => compareVariantDisplayOrder(
@@ -939,6 +941,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     const body = (req.body ?? {}) as Record<string, unknown>;
 
     const fields: Array<{ column: string; value: unknown }> = [];
+    let nextProductId: string | null | undefined;
 
     try {
       const name = asOptionalString(body.name, "name");
@@ -1009,6 +1012,11 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       const block = asOptionalString(body.block, "block");
       if (block !== undefined) fields.push({ column: "block", value: block });
 
+      nextProductId = asOptionalString(body.product_id, "product_id");
+      if (nextProductId !== undefined) {
+        fields.push({ column: "product_id", value: nextProductId });
+      }
+
     } catch (error: any) {
       reply.code(400);
       return { error: { status: 400, message: error.message } };
@@ -1019,30 +1027,84 @@ export async function adminCardsRoutes(app: FastifyInstance) {
       return { error: { status: 400, message: "No supported fields provided" } };
     }
 
-    const assignments = fields.map((field, index) => `${field.column} = $${index + 1}`);
-    const params = fields.map((field) => field.value);
-    params.push(card_number, language);
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
 
-    const updated = await query<CardRow & { image_url: string | null }>(
-      `WITH updated AS (
-         UPDATE cards
+      const existing = await client.query<CardRow>(
+        `SELECT *
+         FROM cards
+         WHERE card_number ILIKE $1 AND language = $2
+         LIMIT 1`,
+        [card_number, language],
+      );
+
+      const current = existing.rows[0];
+      if (!current) {
+        await client.query("ROLLBACK");
+        reply.code(404);
+        return { error: { status: 404, message: "Card not found" } };
+      }
+
+      if (nextProductId !== undefined && nextProductId !== null) {
+        const nextProduct = await getAdminProductRecord(nextProductId, client);
+        if (!nextProduct) {
+          await client.query("ROLLBACK");
+          reply.code(404);
+          return { error: { status: 404, message: "Product not found" } };
+        }
+        if (nextProduct.language !== language) {
+          await client.query("ROLLBACK");
+          reply.code(400);
+          return { error: { status: 400, message: "Product language must match the card language" } };
+        }
+      }
+
+      const assignments = fields.map((field, index) => `${field.column} = $${index + 1}`);
+      const params = fields.map((field) => field.value);
+      params.push(card_number, language);
+
+      const updated = await client.query<CardRow>(
+        `UPDATE cards
          SET ${assignments.join(", ")}, updated_at = NOW()
          WHERE card_number ILIKE $${params.length - 1} AND language = $${params.length}
-         RETURNING *
-       )
-       SELECT updated.*, p.name AS product_name, p.released_at,
-              ${bestImageSubquery("updated.id")} AS image_url
-       FROM updated
-       LEFT JOIN products p ON p.id = updated.product_id`,
-      params,
-    );
+         RETURNING *`,
+        params,
+      );
 
-    if (updated.rows.length === 0) {
-      reply.code(404);
-      return { error: { status: 404, message: "Card not found" } };
+      if (updated.rows.length === 0) {
+        await client.query("ROLLBACK");
+        reply.code(404);
+        return { error: { status: 404, message: "Card not found" } };
+      }
+
+      if (nextProductId !== undefined && current.product_id !== nextProductId) {
+        if (nextProductId) {
+          await ensureCardSource(client, current.id, nextProductId);
+        }
+        if (current.product_id) {
+          await cleanupCardSource(client, current.id, current.product_id);
+        }
+      }
+
+      await client.query("COMMIT");
+
+      const card = await getCardRecord(card_number, language);
+      if (!card) {
+        reply.code(404);
+        return { error: { status: 404, message: "Card not found" } };
+      }
+
+      return { data: formatCard(card) };
+    } catch (error: any) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    } finally {
+      client.release();
     }
-
-    return { data: formatCard(updated.rows[0]) };
   });
 
   app.put("/products/:product_id", async (req, reply) => {

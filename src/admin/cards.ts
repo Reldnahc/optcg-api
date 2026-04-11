@@ -198,6 +198,20 @@ type AdminProductRow = {
   don_count: number;
 };
 
+type AdminProductLinkedCardRow = {
+  card_id: string;
+  card_number: string;
+  name: string;
+  true_set_code: string;
+  card_type: string;
+  rarity: string | null;
+  image_url: string | null;
+  primary_reference: boolean;
+  variant_reference: boolean;
+  source_reference: boolean;
+  variant_match_count: number;
+};
+
 async function getAdminProductRecord(
   productId: string,
   client: PoolClient | null = null,
@@ -345,6 +359,76 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     );
 
     return { data: products.rows };
+  });
+
+  app.get("/products/:product_id/cards", async (req, reply) => {
+    const { product_id } = req.params as { product_id: string };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+
+    const product = await getAdminProductRecord(product_id);
+    if (!product) {
+      reply.code(404);
+      return { error: { status: 404, message: "Product not found" } };
+    }
+
+    const cards = await query<AdminProductLinkedCardRow>(
+      `WITH linked_cards AS (
+         SELECT c.id AS card_id,
+                true AS primary_reference,
+                false AS variant_reference,
+                false AS source_reference
+         FROM cards c
+         WHERE c.product_id = $1
+           AND c.language = $2
+
+         UNION ALL
+
+         SELECT ci.card_id,
+                false AS primary_reference,
+                true AS variant_reference,
+                false AS source_reference
+         FROM card_images ci
+         JOIN cards c ON c.id = ci.card_id
+         WHERE ci.product_id = $1
+           AND c.language = $2
+
+         UNION ALL
+
+         SELECT cs.card_id,
+                false AS primary_reference,
+                false AS variant_reference,
+                true AS source_reference
+         FROM card_sources cs
+         JOIN cards c ON c.id = cs.card_id
+         WHERE cs.product_id = $1
+           AND c.language = $2
+       )
+       SELECT c.id AS card_id,
+              c.card_number,
+              c.name,
+              c.true_set_code,
+              c.card_type,
+              c.rarity,
+              ${bestImageSubquery("c.id")} AS image_url,
+              BOOL_OR(linked_cards.primary_reference) AS primary_reference,
+              BOOL_OR(linked_cards.variant_reference) AS variant_reference,
+              BOOL_OR(linked_cards.source_reference) AS source_reference,
+              COUNT(DISTINCT ci.id) FILTER (WHERE ci.product_id = $1)::int AS variant_match_count
+       FROM linked_cards
+       JOIN cards c ON c.id = linked_cards.card_id
+       LEFT JOIN card_images ci ON ci.card_id = c.id
+       GROUP BY c.id, c.card_number, c.name, c.true_set_code, c.card_type, c.rarity
+       ORDER BY c.card_number ASC`,
+      [product_id, language],
+    );
+
+    return {
+      data: {
+        product,
+        cards: cards.rows,
+      },
+    };
   });
 
   app.post("/products", async (req, reply) => {

@@ -272,7 +272,7 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         OR p.product_set_code ILIKE $${params.length}
         OR EXISTS (
           SELECT 1
-          FROM unnest(COALESCE(p.set_codes, ARRAY[]::text[])) AS code
+          FROM unnest(COALESCE(p.set_codes, ARRAY[]::text[])) AS set_code(code)
           WHERE code ILIKE $${params.length}
         )
       )`);

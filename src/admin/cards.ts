@@ -211,17 +211,32 @@ async function getAdminProductRecord(
             p.product_set_code,
             p.set_codes,
             p.released_at::text AS released_at,
-            COUNT(DISTINCT c.id) FILTER (WHERE c.product_id = p.id)::int AS primary_card_count,
-            COUNT(DISTINCT ci.id) FILTER (WHERE ci.product_id = p.id)::int AS variant_count,
-            COUNT(DISTINCT cs.card_id)::int AS card_source_count,
-            COUNT(DISTINCT d.id)::int AS don_count
+            COALESCE(card_counts.primary_card_count, 0)::int AS primary_card_count,
+            COALESCE(variant_counts.variant_count, 0)::int AS variant_count,
+            COALESCE(card_source_counts.card_source_count, 0)::int AS card_source_count,
+            COALESCE(don_counts.don_count, 0)::int AS don_count
      FROM products p
-     LEFT JOIN cards c ON c.product_id = p.id
-     LEFT JOIN card_images ci ON ci.product_id = p.id
-     LEFT JOIN card_sources cs ON cs.product_id = p.id
-     LEFT JOIN don_cards d ON d.product_id = p.id
-     WHERE p.id = $1
-     GROUP BY p.id`,
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*)::int AS primary_card_count
+       FROM cards c
+       WHERE c.product_id = p.id
+     ) AS card_counts ON true
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*)::int AS variant_count
+       FROM card_images ci
+       WHERE ci.product_id = p.id
+     ) AS variant_counts ON true
+     LEFT JOIN LATERAL (
+       SELECT COUNT(DISTINCT cs.card_id)::int AS card_source_count
+       FROM card_sources cs
+       WHERE cs.product_id = p.id
+     ) AS card_source_counts ON true
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*)::int AS don_count
+       FROM don_cards d
+       WHERE d.product_id = p.id
+     ) AS don_counts ON true
+     WHERE p.id = $1`,
     [productId],
   );
   return result.rows[0] ?? null;

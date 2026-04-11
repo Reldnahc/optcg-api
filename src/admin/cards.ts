@@ -1049,6 +1049,8 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     const client = await getPool().connect();
     try {
       await client.query("BEGIN");
+      await client.query("SET LOCAL lock_timeout = '5s'");
+      await client.query("SET LOCAL statement_timeout = '15s'");
 
       const source = await getAdminProductRecord(product_id, client);
       const target = await getAdminProductRecord(targetProductId, client);
@@ -1134,35 +1136,22 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         [product_id],
       );
 
-      const sourceCounts = await getAdminProductRecord(product_id, client);
-      if (!sourceCounts) {
-        await client.query("ROLLBACK");
-        reply.code(404);
-        return { error: { status: 404, message: "Source product disappeared during merge" } };
-      }
-      if (
-        sourceCounts.primary_card_count > 0
-        || sourceCounts.variant_count > 0
-        || sourceCounts.card_source_count > 0
-        || sourceCounts.don_count > 0
-      ) {
-        await client.query("ROLLBACK");
-        reply.code(409);
-        return { error: { status: 409, message: "Source product still has references after merge" } };
-      }
-
-      await client.query(
+      const deleted = await client.query(
         `DELETE FROM products
          WHERE id = $1`,
         [product_id],
       );
+      if ((deleted.rowCount ?? 0) === 0) {
+        await client.query("ROLLBACK");
+        reply.code(404);
+        return { error: { status: 404, message: "Source product disappeared during merge" } };
+      }
 
       await client.query("COMMIT");
 
-      const mergedProduct = await getAdminProductRecord(targetProductId);
       return {
         data: {
-          product: mergedProduct,
+          product: null,
           source_product_id: product_id,
           target_product_id: targetProductId,
           cards_updated: cardsUpdated.rowCount ?? 0,
@@ -1171,7 +1160,33 @@ export async function adminCardsRoutes(app: FastifyInstance) {
         },
       };
     } catch (error: any) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {}
+
+      req.log.error(
+        {
+          source_product_id: product_id,
+          target_product_id: targetProductId,
+          error_code: error?.code,
+          error_message: error?.message,
+        },
+        "Admin product merge failed",
+      );
+
+      if (error?.code === "23503") {
+        reply.code(409);
+        return { error: { status: 409, message: "Source product still has references after merge" } };
+      }
+      if (error?.code === "55P03") {
+        reply.code(409);
+        return { error: { status: 409, message: "Product merge is blocked by another database lock. Try again." } };
+      }
+      if (error?.code === "57014") {
+        reply.code(503);
+        return { error: { status: 503, message: "Product merge timed out before completion. Try again." } };
+      }
+
       reply.code(400);
       return { error: { status: 400, message: error.message } };
     } finally {

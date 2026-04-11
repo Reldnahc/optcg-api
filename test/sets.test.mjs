@@ -88,12 +88,17 @@ await runTest("route rejects invalid set sort", async () => {
   }
 });
 
-await runTest("route defaults sets to released desc sorting", async () => {
+await runTest("route defaults sets to semantic set_code sorting", async () => {
   const { app, assertDone } = await withSetsApp([
     {
       match: "SELECT c.true_set_code",
       assert: ({ sql }) => {
-        assert.match(sql, /ORDER BY released_at DESC NULLS LAST, c\.true_set_code ASC/);
+        assert.ok(sql.includes("WHEN c.true_set_code ~ '^OP[0-9]+$' THEN 0"));
+        assert.ok(sql.includes("WHEN c.true_set_code ~ '^EB[0-9]+$' THEN 1"));
+        assert.ok(sql.includes("WHEN c.true_set_code ~ '^PRB[0-9]+$' THEN 2"));
+        assert.ok(sql.includes("WHEN c.true_set_code ~ '^ST[0-9]+$' THEN 3"));
+        assert.ok(sql.includes("WHEN c.true_set_code ~ '^P-[0-9]+$' THEN 4"));
+        assert.ok(sql.includes("c.true_set_code ASC"));
       },
       result: {
         rows: [],

@@ -24,6 +24,21 @@ const VALID_SET_SORTS: Record<string, string> = {
   set_code: "true_set_code",
 };
 
+const SET_CODE_FAMILY_RANK_SQL = `CASE
+  WHEN c.true_set_code ~ '^OP[0-9]+$' THEN 0
+  WHEN c.true_set_code ~ '^EB[0-9]+$' THEN 1
+  WHEN c.true_set_code ~ '^PRB[0-9]+$' THEN 2
+  WHEN c.true_set_code ~ '^ST[0-9]+$' THEN 3
+  WHEN c.true_set_code ~ '^P-[0-9]+$' THEN 4
+  ELSE 5
+END`;
+
+const SET_CODE_NUMBER_SQL = `CASE
+  WHEN c.true_set_code ~ '^P-[0-9]+$' THEN CAST(SUBSTRING(c.true_set_code FROM '^P-([0-9]+)$') AS INT)
+  WHEN c.true_set_code ~ '^[A-Z]+[0-9]+$' THEN CAST(SUBSTRING(c.true_set_code FROM '([0-9]+)$') AS INT)
+  ELSE NULL
+END`;
+
 function tcgplayerProductOrderSql(alias: string): string {
   return `CASE
     WHEN NULLIF(${alias}.sub_type, '') IS NULL OR ${alias}.sub_type = 'Normal' THEN 0
@@ -41,7 +56,7 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
   // GET /v1/sets — all sets
   app.get("/sets", { schema: setsListRouteSchema, attachValidation: true }, async (req, reply) => {
     const qs = (req.query ?? {}) as { sort?: string; order?: string };
-    const sortKey = qs.sort ?? "released";
+    const sortKey = qs.sort ?? "set_code";
     if (!VALID_SET_SORTS[sortKey]) {
       reply.code(400);
       return { error: { status: 400, message: `Invalid sort: ${sortKey}` } };
@@ -58,6 +73,10 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
 
     const sortSql = VALID_SET_SORTS[sortKey];
     const nullsSql = sortKey === "released" ? " NULLS LAST" : "";
+    const orderSql = order.toUpperCase();
+    const setCodeOrderSql = `${SET_CODE_FAMILY_RANK_SQL} ${orderSql},
+       ${SET_CODE_NUMBER_SQL} ${orderSql} NULLS LAST,
+       c.true_set_code ${orderSql}`;
 
     const rows = await runQuery<{
       true_set_code: string;
@@ -80,7 +99,7 @@ export async function setsRoutes(app: FastifyInstance, options: SetsRoutesOption
        LEFT JOIN products p ON p.id = c.product_id
        WHERE c.language = 'en'
        GROUP BY c.true_set_code
-       ORDER BY ${sortSql} ${order.toUpperCase()}${nullsSql}, c.true_set_code ASC`,
+       ORDER BY ${sortKey === "set_code" ? setCodeOrderSql : `${sortSql} ${orderSql}${nullsSql}, c.true_set_code ASC`}`,
     );
 
     reply.header("Cache-Control", "public, max-age=86400");

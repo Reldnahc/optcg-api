@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
-import { query } from "optcg-db/db/client.js";
+import type { PoolClient } from "pg";
+import { getPool, query } from "optcg-db/db/client.js";
 import {
   bestImageSubquery,
   cardImageAssetPublicUrlSql,
@@ -78,6 +79,40 @@ function deriveSetCodeFromCardNumber(cardNumber: string): string | null {
   return match ? match[1] : null;
 }
 
+function normalizeProductSetCode(value: unknown, field: string): string | null | undefined {
+  const parsed = asOptionalString(value, field);
+  if (parsed === undefined || parsed === null) return parsed;
+  const normalized = parsed.toUpperCase();
+  if (!/^[A-Z0-9-]+$/.test(normalized)) {
+    throw new Error(`${field} must contain only letters, numbers, or hyphens`);
+  }
+  return normalized;
+}
+
+function normalizeProductSetCodes(value: unknown, field: string): string[] | null | undefined {
+  const parsed = asOptionalStringArray(value, field);
+  if (parsed === undefined || parsed === null) return parsed;
+  const normalized = parsed.map((item) => {
+    const code = item.toUpperCase();
+    if (!/^[A-Z0-9-]+$/.test(code)) {
+      throw new Error(`${field} contains an invalid set code: ${item}`);
+    }
+    return code;
+  });
+  return [...new Set(normalized)];
+}
+
+function mergeProductSetCodes(
+  targetSetCodes: string[] | null | undefined,
+  sourceSetCodes: string[] | null | undefined,
+): string[] | null {
+  const merged: string[] = [];
+  for (const code of [...(targetSetCodes ?? []), ...(sourceSetCodes ?? [])]) {
+    if (!merged.includes(code)) merged.push(code);
+  }
+  return merged.length > 0 ? merged : null;
+}
+
 async function syncManualVariantAssets(image: {
   id: string;
   image_url: string | null;
@@ -134,10 +169,12 @@ async function getCardRecord(cardNumber: string, language: string) {
 async function getCardImageRecord(cardId: string, variantIndex: number) {
   const result = await query<{
     id: string;
+    card_id: string;
+    product_id: string | null;
     variant_index: number;
     label: string | null;
   }>(
-    `SELECT id, variant_index, label
+    `SELECT id, card_id, product_id, variant_index, label
      FROM card_images
      WHERE card_id = $1 AND variant_index = $2
      LIMIT 1`,
@@ -147,7 +184,168 @@ async function getCardImageRecord(cardId: string, variantIndex: number) {
   return result.rows[0] ?? null;
 }
 
+type AdminProductRow = {
+  id: string;
+  language: string;
+  name: string;
+  source: string;
+  product_set_code: string | null;
+  set_codes: string[] | null;
+  released_at: string | null;
+  primary_card_count: number;
+  variant_count: number;
+  card_source_count: number;
+  don_count: number;
+};
+
+async function getAdminProductRecord(
+  productId: string,
+  client: PoolClient | null = null,
+): Promise<AdminProductRow | null> {
+  const executor = client ?? getPool();
+  const result = await executor.query<AdminProductRow>(
+    `SELECT p.id,
+            p.language,
+            p.name,
+            p.source,
+            p.product_set_code,
+            p.set_codes,
+            p.released_at::text AS released_at,
+            COUNT(DISTINCT c.id) FILTER (WHERE c.product_id = p.id)::int AS primary_card_count,
+            COUNT(DISTINCT ci.id) FILTER (WHERE ci.product_id = p.id)::int AS variant_count,
+            COUNT(DISTINCT cs.card_id)::int AS card_source_count,
+            COUNT(DISTINCT d.id)::int AS don_count
+     FROM products p
+     LEFT JOIN cards c ON c.product_id = p.id
+     LEFT JOIN card_images ci ON ci.product_id = p.id
+     LEFT JOIN card_sources cs ON cs.product_id = p.id
+     LEFT JOIN don_cards d ON d.product_id = p.id
+     WHERE p.id = $1
+     GROUP BY p.id`,
+    [productId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function ensureCardSource(client: PoolClient, cardId: string, productId: string) {
+  await client.query(
+    `INSERT INTO card_sources (card_id, product_id)
+     VALUES ($1, $2)
+     ON CONFLICT (card_id, product_id) DO NOTHING`,
+    [cardId, productId],
+  );
+}
+
+async function cleanupCardSource(client: PoolClient, cardId: string, productId: string) {
+  await client.query(
+    `DELETE FROM card_sources
+     WHERE card_id = $1
+       AND product_id = $2
+       AND NOT EXISTS (
+         SELECT 1 FROM cards
+         WHERE id = $1
+           AND product_id = $2
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM card_images
+         WHERE card_id = $1
+           AND product_id = $2
+       )`,
+    [cardId, productId],
+  );
+}
+
 export async function adminCardsRoutes(app: FastifyInstance) {
+  app.get("/products", async (req, reply) => {
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+    const limit = Math.min(500, Math.max(1, parseInt(qs.limit || "200", 10)));
+    const search = qs.q?.trim() ?? "";
+
+    const params: unknown[] = [language];
+    const conditions = ["p.language = $1"];
+
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`(
+        p.name ILIKE $${params.length}
+        OR p.product_set_code ILIKE $${params.length}
+        OR EXISTS (
+          SELECT 1
+          FROM unnest(COALESCE(p.set_codes, ARRAY[]::text[])) AS code
+          WHERE code ILIKE $${params.length}
+        )
+      )`);
+    }
+
+    params.push(limit);
+    const products = await query<AdminProductRow>(
+      `SELECT p.id,
+              p.language,
+              p.name,
+              p.source,
+              p.product_set_code,
+              p.set_codes,
+              p.released_at::text AS released_at,
+              COUNT(DISTINCT c.id) FILTER (WHERE c.product_id = p.id)::int AS primary_card_count,
+              COUNT(DISTINCT ci.id) FILTER (WHERE ci.product_id = p.id)::int AS variant_count,
+              COUNT(DISTINCT cs.card_id)::int AS card_source_count,
+              COUNT(DISTINCT d.id)::int AS don_count
+       FROM products p
+       LEFT JOIN cards c ON c.product_id = p.id
+       LEFT JOIN card_images ci ON ci.product_id = p.id
+       LEFT JOIN card_sources cs ON cs.product_id = p.id
+       LEFT JOIN don_cards d ON d.product_id = p.id
+       WHERE ${conditions.join(" AND ")}
+       GROUP BY p.id
+       ORDER BY p.released_at DESC NULLS LAST, p.name ASC, p.id ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+
+    return { data: products.rows };
+  });
+
+  app.post("/products", async (req, reply) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    try {
+      const name = asOptionalString(body.name, "name");
+      if (!name) throw new Error("name is required");
+
+      const language = asOptionalString(body.language, "language") ?? "en";
+      const source = asOptionalString(body.source, "source") ?? "bandai";
+      if (source !== "bandai" && source !== "tcgplayer") {
+        throw new Error("source must be either 'bandai' or 'tcgplayer'");
+      }
+
+      const productSetCode = normalizeProductSetCode(body.product_set_code, "product_set_code");
+      const setCodesInput = normalizeProductSetCodes(body.set_codes, "set_codes");
+      const setCodes = setCodesInput === undefined
+        ? (productSetCode ? [productSetCode] : null)
+        : setCodesInput;
+      const releasedAt = asOptionalDateString(body.released_at, "released_at") ?? null;
+      const finalProductSetCode = productSetCode ?? setCodes?.[0] ?? null;
+
+      const inserted = await query<{ id: string }>(
+        `INSERT INTO products (language, name, source, set_codes, released_at, product_set_code)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id`,
+        [language, name, source, setCodes, releasedAt, finalProductSetCode],
+      );
+
+      const product = await getAdminProductRecord(inserted.rows[0].id);
+      return { data: product };
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        reply.code(409);
+        return { error: { status: 409, message: "A product with that name and language already exists" } };
+      }
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    }
+  });
+
   app.post("/cards", async (req, reply) => {
     const qs = req.query as Record<string, string>;
     const language = qs.lang || "en";
@@ -726,39 +924,251 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     const { product_id } = req.params as { product_id: string };
     const body = (req.body ?? {}) as Record<string, unknown>;
 
-    let releasedAt: string | null | undefined;
+    const fields: Array<{ column: string; value: unknown }> = [];
     try {
-      releasedAt = asOptionalDateString(body.released_at, "released_at");
+      const name = asOptionalString(body.name, "name");
+      if (name !== undefined) fields.push({ column: "name", value: name });
+
+      const releasedAt = asOptionalDateString(body.released_at, "released_at");
+      if (releasedAt !== undefined) fields.push({ column: "released_at", value: releasedAt });
+
+      const setCodes = normalizeProductSetCodes(body.set_codes, "set_codes");
+      if (setCodes !== undefined) {
+        fields.push({ column: "set_codes", value: setCodes });
+        if (body.product_set_code === undefined) {
+          fields.push({ column: "product_set_code", value: setCodes?.[0] ?? null });
+        }
+      }
+
+      const productSetCode = normalizeProductSetCode(body.product_set_code, "product_set_code");
+      if (productSetCode !== undefined) {
+        fields.push({ column: "product_set_code", value: productSetCode });
+      }
     } catch (error: any) {
       reply.code(400);
       return { error: { status: 400, message: error.message } };
     }
 
-    if (releasedAt === undefined) {
+    if (fields.length === 0) {
       reply.code(400);
       return { error: { status: 400, message: "No supported fields provided" } };
     }
 
-    const updated = await query<{
-      id: string;
-      language: string;
-      name: string;
-      product_set_code: string | null;
-      released_at: string | null;
-    }>(
-      `UPDATE products
-       SET released_at = $1
-       WHERE id = $2
-       RETURNING id, language, name, product_set_code, released_at`,
-      [releasedAt, product_id],
-    );
+    try {
+      const assignments = fields.map((field, index) => `${field.column} = $${index + 1}`);
+      const params = fields.map((field) => field.value);
+      params.push(product_id);
 
-    if (updated.rows.length === 0) {
+      const updated = await query<{ id: string }>(
+        `UPDATE products
+         SET ${assignments.join(", ")}
+         WHERE id = $${params.length}
+         RETURNING id`,
+        params,
+      );
+
+      if (updated.rows.length === 0) {
+        reply.code(404);
+        return { error: { status: 404, message: "Product not found" } };
+      }
+
+      const product = await getAdminProductRecord(product_id);
+      return { data: product };
+    } catch (error: any) {
+      if (error?.code === "23505") {
+        reply.code(409);
+        return { error: { status: 409, message: "A product with that name and language already exists" } };
+      }
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    }
+  });
+
+  app.post("/products/:product_id/merge", async (req, reply) => {
+    const { product_id } = req.params as { product_id: string };
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    let targetProductId: string | null | undefined;
+    try {
+      targetProductId = asOptionalString(body.target_product_id, "target_product_id");
+    } catch (error: any) {
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    }
+
+    if (!targetProductId) {
+      reply.code(400);
+      return { error: { status: 400, message: "target_product_id is required" } };
+    }
+    if (targetProductId === product_id) {
+      reply.code(400);
+      return { error: { status: 400, message: "Cannot merge a product into itself" } };
+    }
+
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+
+      const source = await getAdminProductRecord(product_id, client);
+      const target = await getAdminProductRecord(targetProductId, client);
+
+      if (!source || !target) {
+        await client.query("ROLLBACK");
+        reply.code(404);
+        return { error: { status: 404, message: "Source or target product not found" } };
+      }
+      if (source.language !== target.language) {
+        await client.query("ROLLBACK");
+        reply.code(400);
+        return { error: { status: 400, message: "Products must share the same language to merge" } };
+      }
+
+      const donConflict = await client.query<{ count: string }>(
+        `SELECT COUNT(*) AS count
+         FROM don_cards source_don
+         JOIN don_cards target_don
+           ON target_don.product_id = $2
+          AND target_don.character = source_don.character
+          AND target_don.finish = source_don.finish
+         WHERE source_don.product_id = $1`,
+        [product_id, targetProductId],
+      );
+      if (parseInt(donConflict.rows[0]?.count ?? "0", 10) > 0) {
+        await client.query("ROLLBACK");
+        reply.code(409);
+        return {
+          error: { status: 409, message: "Cannot merge products because DON!! entries would conflict" },
+        };
+      }
+
+      const mergedSetCodes = mergeProductSetCodes(target.set_codes, source.set_codes);
+      const mergedReleasedAt = target.released_at ?? source.released_at;
+      const mergedSetCode = target.product_set_code ?? source.product_set_code ?? mergedSetCodes?.[0] ?? null;
+
+      await client.query(
+        `UPDATE products
+         SET set_codes = $1,
+             released_at = $2,
+             product_set_code = $3
+         WHERE id = $4`,
+        [mergedSetCodes, mergedReleasedAt, mergedSetCode, targetProductId],
+      );
+
+      await client.query(
+        `INSERT INTO card_sources (card_id, product_id)
+         SELECT DISTINCT refs.card_id, $2
+         FROM (
+           SELECT card_id FROM card_sources WHERE product_id = $1
+           UNION
+           SELECT id AS card_id FROM cards WHERE product_id = $1
+           UNION
+           SELECT card_id FROM card_images WHERE product_id = $1
+         ) refs
+         ON CONFLICT (card_id, product_id) DO NOTHING`,
+        [product_id, targetProductId],
+      );
+
+      const cardsUpdated = await client.query(
+        `UPDATE cards
+         SET product_id = $2
+         WHERE product_id = $1`,
+        [product_id, targetProductId],
+      );
+      const variantsUpdated = await client.query(
+        `UPDATE card_images
+         SET product_id = $2
+         WHERE product_id = $1`,
+        [product_id, targetProductId],
+      );
+      const donUpdated = await client.query(
+        `UPDATE don_cards
+         SET product_id = $2
+         WHERE product_id = $1`,
+        [product_id, targetProductId],
+      );
+
+      await client.query(
+        `DELETE FROM card_sources
+         WHERE product_id = $1`,
+        [product_id],
+      );
+
+      const sourceCounts = await getAdminProductRecord(product_id, client);
+      if (!sourceCounts) {
+        await client.query("ROLLBACK");
+        reply.code(404);
+        return { error: { status: 404, message: "Source product disappeared during merge" } };
+      }
+      if (
+        sourceCounts.primary_card_count > 0
+        || sourceCounts.variant_count > 0
+        || sourceCounts.card_source_count > 0
+        || sourceCounts.don_count > 0
+      ) {
+        await client.query("ROLLBACK");
+        reply.code(409);
+        return { error: { status: 409, message: "Source product still has references after merge" } };
+      }
+
+      await client.query(
+        `DELETE FROM products
+         WHERE id = $1`,
+        [product_id],
+      );
+
+      await client.query("COMMIT");
+
+      const mergedProduct = await getAdminProductRecord(targetProductId);
+      return {
+        data: {
+          product: mergedProduct,
+          source_product_id: product_id,
+          target_product_id: targetProductId,
+          cards_updated: cardsUpdated.rowCount ?? 0,
+          variants_updated: variantsUpdated.rowCount ?? 0,
+          don_updated: donUpdated.rowCount ?? 0,
+        },
+      };
+    } catch (error: any) {
+      await client.query("ROLLBACK");
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    } finally {
+      client.release();
+    }
+  });
+
+  app.delete("/products/:product_id", async (req, reply) => {
+    const { product_id } = req.params as { product_id: string };
+    const product = await getAdminProductRecord(product_id);
+
+    if (!product) {
       reply.code(404);
       return { error: { status: 404, message: "Product not found" } };
     }
 
-    return { data: updated.rows[0] };
+    if (
+      product.primary_card_count > 0
+      || product.variant_count > 0
+      || product.card_source_count > 0
+      || product.don_count > 0
+    ) {
+      reply.code(409);
+      return {
+        error: {
+          status: 409,
+          message: "Product is still referenced. Reassign or merge it before deleting.",
+        },
+      };
+    }
+
+    await query(
+      `DELETE FROM products
+       WHERE id = $1`,
+      [product_id],
+    );
+
+    return { ok: true };
   });
 
   app.get("/cards/:card_number/tcgplayer-products", async (req, reply) => {
@@ -1110,6 +1520,90 @@ export async function adminCardsRoutes(app: FastifyInstance) {
     }
 
     return { data: updated.rows[0] };
+  });
+
+  app.put("/cards/:card_number/images/:variant_index/product", async (req, reply) => {
+    const { card_number, variant_index } = req.params as { card_number: string; variant_index: string };
+    const qs = req.query as Record<string, string>;
+    const language = qs.lang || "en";
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const variantIndex = parseInt(variant_index, 10);
+
+    if (!Number.isInteger(variantIndex) || variantIndex < 0) {
+      reply.code(400);
+      return { error: { status: 400, message: "variant_index must be a non-negative integer" } };
+    }
+
+    let nextProductId: string | null | undefined;
+    try {
+      nextProductId = asOptionalString(body.product_id, "product_id");
+    } catch (error: any) {
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    }
+
+    if (nextProductId === undefined) {
+      reply.code(400);
+      return { error: { status: 400, message: "product_id is required" } };
+    }
+
+    const card = await getCardRecord(card_number, language);
+    if (!card) {
+      reply.code(404);
+      return { error: { status: 404, message: "Card not found" } };
+    }
+
+    const image = await getCardImageRecord(card.id, variantIndex);
+    if (!image) {
+      reply.code(404);
+      return { error: { status: 404, message: "Image variant not found" } };
+    }
+
+    if (nextProductId === image.product_id) {
+      return { data: { product_id: image.product_id } };
+    }
+
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+
+      if (nextProductId) {
+        const nextProduct = await getAdminProductRecord(nextProductId, client);
+        if (!nextProduct) {
+          await client.query("ROLLBACK");
+          reply.code(404);
+          return { error: { status: 404, message: "Product not found" } };
+        }
+        if (nextProduct.language !== language) {
+          await client.query("ROLLBACK");
+          reply.code(400);
+          return { error: { status: 400, message: "Variant product must match the card language" } };
+        }
+      }
+
+      await client.query(
+        `UPDATE card_images
+         SET product_id = $1
+         WHERE id = $2`,
+        [nextProductId, image.id],
+      );
+
+      if (nextProductId) {
+        await ensureCardSource(client, card.id, nextProductId);
+      }
+      if (image.product_id && image.product_id !== nextProductId) {
+        await cleanupCardSource(client, card.id, image.product_id);
+      }
+
+      await client.query("COMMIT");
+      return { data: { product_id: nextProductId } };
+    } catch (error: any) {
+      await client.query("ROLLBACK");
+      reply.code(400);
+      return { error: { status: 400, message: error.message } };
+    } finally {
+      client.release();
+    }
   });
 
   app.delete("/cards/:card_number/images/:variant_index/tcgplayer-products/:mapping_id", async (req, reply) => {
